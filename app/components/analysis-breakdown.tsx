@@ -426,12 +426,8 @@ function GoalsPeriodHeatmap({
 }) {
   const values = PERIOD_LABELS.map((p) => goals[p] ?? 0);
   const max = Math.max(...values, 1);
-  const colorMap = {
-    green: { bg: "bg-green-500", text: "text-green-400" },
-    blue: { bg: "bg-blue-500", text: "text-blue-400" },
-    red: { bg: "bg-red-500", text: "text-red-400" },
-  };
-  const c = colorMap[color];
+  const bgMap = { green: "bg-green-500", blue: "bg-blue-500", red: "bg-red-500" };
+  const bg = bgMap[color];
 
   return (
     <div>
@@ -442,7 +438,7 @@ function GoalsPeriodHeatmap({
           return (
             <div key={period} className="flex-1 group relative">
               <div
-                className={`h-5 rounded-sm ${c.bg}`}
+                className={`h-5 rounded-sm ${bg}`}
                 style={{ opacity }}
               />
               <div className="absolute -top-6 left-1/2 -translate-x-1/2 hidden group-hover:block bg-zinc-900 border border-zinc-700 rounded px-1.5 py-0.5 text-[9px] text-zinc-300 whitespace-nowrap z-10">
@@ -492,8 +488,6 @@ function TacticsCompact({
     if (avgAgainst >= 2.0) styleBadges.push({ label: "Perméable", color: "bg-red-900 text-red-300" });
 
     const formationColor = color === "green" ? "bg-green-800 text-green-200" : "bg-blue-800 text-blue-200";
-    const record = color === "green" ? tactics.homeRecord : tactics.awayRecord;
-    const recordLabel = color === "green" ? "Dom" : "Ext";
 
     return (
       <div className="space-y-2">

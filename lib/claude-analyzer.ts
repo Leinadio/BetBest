@@ -217,11 +217,17 @@ Victoire domicile (1) : ${statsScore.homeScore}%
 Match nul (N) : ${statsScore.drawScore}%
 Victoire extérieur (2) : ${statsScore.awayScore}%
 
+INSTRUCTIONS D'ANALYSE :
+- Croise les données tactiques (bilans dom/ext, formations, distribution des buts par période) avec les statistiques générales
+- Identifie les matchups clés : équipe offensive vs défense solide, force à domicile vs faiblesse à l'extérieur
+- Prends en compte les absences de joueurs clés et leur impact sur le système tactique
+- Utilise les clean sheets, la distribution des buts par période et les séries pour évaluer la dynamique
+
 Réponds UNIQUEMENT avec un JSON valide (sans markdown, sans backticks) dans ce format :
 {
   "outcome": "1" | "N" | "2",
   "confidence": <nombre entre 50 et 95>,
-  "reasoning": "<analyse en français, 2-3 phrases, mentionne les joueurs clés et absences importantes si pertinent>"
+  "reasoning": "<analyse en français, 3-4 phrases, mentionne les matchups tactiques, joueurs clés et absences importantes>"
 }`;
 
   const message = await anthropic.messages.create({

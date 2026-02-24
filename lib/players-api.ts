@@ -185,14 +185,16 @@ export function computeSquadQualityScore(
   // Contribution bonus
   const contributionScore = Math.min(totalContributions / 40, 1) * 0.4;
 
-  // Penalty for critical absences
+  // Penalty for critical absences (capped at 60% of raw score)
+  const rawScore = baseScore + contributionScore;
   const absencePenalty = criticalAbsences.reduce((penalty, a) => {
     const contributions = a.player.goals + a.player.assists;
     const weight = contributions / Math.max(totalContributions, 1);
     return penalty + weight * (a.impact === "high" ? 0.8 : 0.5);
   }, 0);
+  const cappedPenalty = Math.min(absencePenalty, rawScore * 0.6);
 
-  return Math.max(0, Math.min(1, baseScore + contributionScore - absencePenalty));
+  return Math.max(0, Math.min(1, rawScore - cappedPenalty));
 }
 
 export function buildTeamPlayerAnalysis(
