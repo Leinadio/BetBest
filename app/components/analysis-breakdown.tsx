@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { GoalsByPeriod, NewsArticle, Prediction, TacticalProfile, TeamPlayerAnalysis } from "@/lib/types";
+import { GoalsByPeriod, HeadToHeadRecord, MatchContext, MatchOdds, NewsArticle, Prediction, RefereeProfile, ScheduleFatigue, TacticalProfile, TeamPlayerAnalysis } from "@/lib/types";
 import Image from "next/image";
 
 interface AnalysisBreakdownProps {
@@ -573,6 +573,338 @@ function TacticsCompact({
   );
 }
 
+function HeadToHeadCompact({
+  h2h,
+  homeTeamName,
+  awayTeamName,
+}: {
+  h2h: HeadToHeadRecord;
+  homeTeamName: string;
+  awayTeamName: string;
+}) {
+  const total = h2h.team1Wins + h2h.draws + h2h.team2Wins;
+
+  return (
+    <div>
+      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3">
+        Confrontations directes
+      </h5>
+
+      {/* Bilan résumé */}
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-center">
+          <div className="text-lg font-bold text-green-400">{h2h.team1Wins}</div>
+          <div className="text-[10px] text-zinc-500">{homeTeamName}</div>
+        </div>
+        <div className="text-center">
+          <div className="text-lg font-bold text-zinc-400">{h2h.draws}</div>
+          <div className="text-[10px] text-zinc-500">Nuls</div>
+        </div>
+        <div className="text-center">
+          <div className="text-lg font-bold text-blue-400">{h2h.team2Wins}</div>
+          <div className="text-[10px] text-zinc-500">{awayTeamName}</div>
+        </div>
+      </div>
+
+      {/* Barre visuelle */}
+      {total > 0 && (
+        <div className="flex h-2 w-full overflow-hidden rounded-full mb-3">
+          <div
+            className="bg-green-500 transition-all duration-700"
+            style={{ width: `${(h2h.team1Wins / total) * 100}%` }}
+          />
+          <div
+            className="bg-zinc-500 transition-all duration-700"
+            style={{ width: `${(h2h.draws / total) * 100}%` }}
+          />
+          <div
+            className="bg-blue-500 transition-all duration-700"
+            style={{ width: `${(h2h.team2Wins / total) * 100}%` }}
+          />
+        </div>
+      )}
+
+      {/* Liste des matchs */}
+      <div className="space-y-1">
+        {h2h.matches.map((m, i) => {
+          const date = new Date(m.date).toLocaleDateString("fr-FR", {
+            day: "numeric",
+            month: "short",
+            year: "numeric",
+          });
+          const homeWin = m.homeGoals > m.awayGoals;
+          const awayWin = m.awayGoals > m.homeGoals;
+
+          return (
+            <div
+              key={i}
+              className="flex items-center gap-2 rounded-md bg-zinc-800/40 px-3 py-1.5 text-[11px]"
+            >
+              <span className="text-zinc-600 w-[70px] shrink-0">{date}</span>
+              <span className={`text-right flex-1 truncate ${homeWin ? "text-green-400 font-medium" : "text-zinc-400"}`}>
+                {m.homeTeam}
+              </span>
+              <span className="font-bold text-zinc-200 shrink-0">
+                {m.homeGoals} - {m.awayGoals}
+              </span>
+              <span className={`flex-1 truncate ${awayWin ? "text-blue-400 font-medium" : "text-zinc-400"}`}>
+                {m.awayTeam}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function MatchContextCompact({
+  context,
+  homeTeamName,
+  awayTeamName,
+}: {
+  context: MatchContext;
+  homeTeamName: string;
+  awayTeamName: string;
+}) {
+  const stakesConfig: Record<string, { label: string; color: string }> = {
+    title: { label: "Course au titre", color: "bg-yellow-900 text-yellow-300" },
+    europe: { label: "Course européenne", color: "bg-blue-900 text-blue-300" },
+    midtable: { label: "Mi-tableau", color: "bg-zinc-700 text-zinc-300" },
+    relegation: { label: "Maintien", color: "bg-red-900 text-red-300" },
+  };
+
+  const home = stakesConfig[context.homeStakes] ?? stakesConfig.midtable;
+  const away = stakesConfig[context.awayStakes] ?? stakesConfig.midtable;
+
+  return (
+    <div>
+      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3">
+        Contexte du match
+      </h5>
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px] text-zinc-400">{homeTeamName}</span>
+          <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${home.color}`}>
+            {home.label}
+          </span>
+        </div>
+        <span className="text-zinc-700 text-[10px]">vs</span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px] text-zinc-400">{awayTeamName}</span>
+          <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${away.color}`}>
+            {away.label}
+          </span>
+        </div>
+        {context.isDerby && (
+          <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-orange-900 text-orange-300">
+            Derby
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RefereeCompact({ referee }: { referee: RefereeProfile }) {
+  const avgYellows = referee.avgYellowsPerMatch;
+  const severity = avgYellows >= 5 ? "Sévère" : avgYellows >= 3.5 ? "Moyen" : "Permissif";
+  const severityColor =
+    severity === "Sévère"
+      ? "bg-red-900 text-red-300"
+      : severity === "Moyen"
+      ? "bg-yellow-900 text-yellow-300"
+      : "bg-green-900 text-green-300";
+
+  return (
+    <div>
+      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3">
+        Arbitre
+      </h5>
+      <div className="rounded-lg bg-zinc-800/40 px-4 py-3">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-sm font-medium text-zinc-200">{referee.name}</span>
+          <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${severityColor}`}>
+            {severity}
+          </span>
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          <div className="text-center">
+            <div className="text-lg font-bold text-yellow-400">{referee.avgYellowsPerMatch}</div>
+            <div className="text-[10px] text-zinc-500">Jaunes/match</div>
+          </div>
+          <div className="text-center">
+            <div className="text-lg font-bold text-red-400">{referee.avgRedsPerMatch}</div>
+            <div className="text-[10px] text-zinc-500">Rouges/match</div>
+          </div>
+          <div className="text-center">
+            <div className="text-lg font-bold text-zinc-300">{referee.penaltiesAwarded}</div>
+            <div className="text-[10px] text-zinc-500">Penalties</div>
+          </div>
+        </div>
+        <div className="mt-2 text-[10px] text-zinc-500 text-center">
+          {referee.matchesOfficiated} matchs arbitrés cette saison
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OddsCompact({
+  odds,
+  statsScore,
+  homeTla,
+  awayTla,
+}: {
+  odds: MatchOdds;
+  statsScore: { homeScore: number; drawScore: number; awayScore: number };
+  homeTla: string;
+  awayTla: string;
+}) {
+  // Convert odds to implied probabilities
+  const total = 1 / odds.homeWin + 1 / odds.draw + 1 / odds.awayWin;
+  const impliedHome = Math.round((1 / odds.homeWin / total) * 100);
+  const impliedDraw = Math.round((1 / odds.draw / total) * 100);
+  const impliedAway = Math.round((1 / odds.awayWin / total) * 100);
+
+  return (
+    <div>
+      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3">
+        Cotes du marché
+      </h5>
+      <div className="rounded-lg bg-zinc-800/40 px-4 py-3 space-y-3">
+        {/* Cotes brutes */}
+        <div className="flex items-center justify-between">
+          <div className="text-center flex-1">
+            <div className="text-lg font-bold text-green-400">{odds.homeWin}</div>
+            <div className="text-[10px] text-zinc-500">1 · {homeTla}</div>
+          </div>
+          <div className="text-center flex-1">
+            <div className="text-lg font-bold text-zinc-300">{odds.draw}</div>
+            <div className="text-[10px] text-zinc-500">N · Nul</div>
+          </div>
+          <div className="text-center flex-1">
+            <div className="text-lg font-bold text-blue-400">{odds.awayWin}</div>
+            <div className="text-[10px] text-zinc-500">2 · {awayTla}</div>
+          </div>
+        </div>
+
+        {/* Barre de probabilité implicite */}
+        <div>
+          <div className="text-[10px] text-zinc-500 mb-1">Probabilité implicite (marché)</div>
+          <div className="flex h-2 w-full overflow-hidden rounded-full">
+            <div className="bg-green-500" style={{ width: `${impliedHome}%` }} />
+            <div className="bg-zinc-500" style={{ width: `${impliedDraw}%` }} />
+            <div className="bg-blue-500" style={{ width: `${impliedAway}%` }} />
+          </div>
+          <div className="flex justify-between text-[10px] text-zinc-500 mt-0.5">
+            <span>{impliedHome}%</span>
+            <span>{impliedDraw}%</span>
+            <span>{impliedAway}%</span>
+          </div>
+        </div>
+
+        {/* Comparaison modèle vs marché */}
+        <div>
+          <div className="text-[10px] text-zinc-500 mb-1">Modèle vs Marché</div>
+          <div className="grid grid-cols-3 gap-2 text-center text-[11px]">
+            {[
+              { label: homeTla, model: statsScore.homeScore, market: impliedHome },
+              { label: "Nul", model: statsScore.drawScore, market: impliedDraw },
+              { label: awayTla, model: statsScore.awayScore, market: impliedAway },
+            ].map(({ label, model, market }) => {
+              const diff = model - market;
+              const diffColor = Math.abs(diff) < 5 ? "text-zinc-400" : diff > 0 ? "text-green-400" : "text-red-400";
+              return (
+                <div key={label}>
+                  <span className="text-zinc-400">{label}</span>
+                  <span className={`block font-medium ${diffColor}`}>
+                    {diff > 0 ? "+" : ""}{diff}%
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="text-[10px] text-zinc-600 text-center">
+          Source : {odds.bookmaker}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FatigueCompact({
+  fatigue,
+  homeTeamName,
+  awayTeamName,
+}: {
+  fatigue: ScheduleFatigue;
+  homeTeamName: string;
+  awayTeamName: string;
+}) {
+  const renderTeam = (name: string, data: ScheduleFatigue["home"], color: "green" | "blue") => {
+    const restColor =
+      data.daysSinceLastMatch !== null && data.daysSinceLastMatch <= 3
+        ? "text-red-400"
+        : data.daysSinceLastMatch !== null && data.daysSinceLastMatch <= 5
+        ? "text-yellow-400"
+        : "text-green-400";
+
+    const loadColor =
+      data.matchesLast30Days >= 10
+        ? "text-red-400"
+        : data.matchesLast30Days >= 7
+        ? "text-yellow-400"
+        : "text-green-400";
+
+    const barColor = color === "green" ? "bg-green-500" : "bg-blue-500";
+    const loadPct = Math.min(data.matchesLast30Days / 12, 1) * 100;
+
+    return (
+      <div className="rounded-lg bg-zinc-800/40 px-3 py-2.5">
+        <div className="text-xs font-medium text-zinc-400 mb-2">{name}</div>
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between text-[11px]">
+            <span className="text-zinc-500">Repos</span>
+            <span className={`font-medium ${restColor}`}>
+              {data.daysSinceLastMatch !== null ? `${data.daysSinceLastMatch}j` : "—"}
+            </span>
+          </div>
+          <div className="flex items-center justify-between text-[11px]">
+            <span className="text-zinc-500">Prochain</span>
+            <span className="text-zinc-300">
+              {data.daysUntilNextMatch !== null ? `dans ${data.daysUntilNextMatch}j` : "—"}
+            </span>
+          </div>
+          <div>
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="text-zinc-500">Charge (30j)</span>
+              <span className={`font-medium ${loadColor}`}>{data.matchesLast30Days} matchs</span>
+            </div>
+            <div className="h-1.5 rounded-full bg-zinc-700 overflow-hidden mt-1">
+              <div className={`h-full rounded-full ${barColor}`} style={{ width: `${loadPct}%` }} />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3">
+        Fatigue / Calendrier
+      </h5>
+      <div className="grid grid-cols-2 gap-3">
+        {renderTeam(homeTeamName, fatigue.home, "green")}
+        {renderTeam(awayTeamName, fatigue.away, "blue")}
+      </div>
+    </div>
+  );
+}
+
 function isSuspension(reason: string | undefined | null): boolean {
   const lower = (reason ?? "").toLowerCase();
   return (
@@ -669,7 +1001,7 @@ function InjuriesCompact({
 export function AnalysisBreakdown({ prediction }: AnalysisBreakdownProps) {
   const [open, setOpen] = useState(false);
 
-  const { statsScore, homeTeam, awayTeam, playerAnalysis, injuries, news, tactics } =
+  const { statsScore, homeTeam, awayTeam, playerAnalysis, injuries, news, tactics, headToHead, referee, odds, fatigue, matchContext } =
     prediction;
 
   return (
@@ -768,7 +1100,59 @@ export function AnalysisBreakdown({ prediction }: AnalysisBreakdownProps) {
             <SectionUnavailable label="Profil tactique" />
           )}
 
-          {/* 6. Injuries */}
+          {/* 6. Head-to-head */}
+          {headToHead && headToHead.matches.length > 0 ? (
+            <HeadToHeadCompact
+              h2h={headToHead}
+              homeTeamName={homeTeam.shortName}
+              awayTeamName={awayTeam.shortName}
+            />
+          ) : (
+            <SectionUnavailable label="Confrontations directes" />
+          )}
+
+          {/* 7. Match context */}
+          {matchContext ? (
+            <MatchContextCompact
+              context={matchContext}
+              homeTeamName={homeTeam.shortName}
+              awayTeamName={awayTeam.shortName}
+            />
+          ) : (
+            <SectionUnavailable label="Contexte du match" />
+          )}
+
+          {/* 8. Referee */}
+          {referee ? (
+            <RefereeCompact referee={referee} />
+          ) : (
+            <SectionUnavailable label="Arbitre" />
+          )}
+
+          {/* 9. Odds */}
+          {odds ? (
+            <OddsCompact
+              odds={odds}
+              statsScore={statsScore}
+              homeTla={homeTeam.tla}
+              awayTla={awayTeam.tla}
+            />
+          ) : (
+            <SectionUnavailable label="Cotes du marché" />
+          )}
+
+          {/* 10. Fatigue */}
+          {fatigue ? (
+            <FatigueCompact
+              fatigue={fatigue}
+              homeTeamName={homeTeam.shortName}
+              awayTeamName={awayTeam.shortName}
+            />
+          ) : (
+            <SectionUnavailable label="Fatigue / Calendrier" />
+          )}
+
+          {/* 11. Injuries */}
           <InjuriesCompact
             homeInjuries={injuries.home}
             awayInjuries={injuries.away}
@@ -779,11 +1163,13 @@ export function AnalysisBreakdown({ prediction }: AnalysisBreakdownProps) {
           {/* 7. Methodology note */}
           <div className="rounded-lg bg-zinc-800/30 px-4 py-3 text-[11px] text-zinc-500 leading-relaxed">
             <span className="font-medium text-zinc-400">Méthodologie :</span>{" "}
-            Moteur statistique (7 facteurs pondérés) + analyse des joueurs clés
+            Moteur statistique (8 facteurs pondérés) + analyse des joueurs clés
             (top buteurs/passeurs de la ligue) croisée avec les blessures +
             profils tactiques (formations, bilans dom/ext, distribution des buts) +
-            raisonnement Claude IA. Les probabilités reflètent le score composite
-            avant ajustement IA.
+            confrontations directes + contexte du match (enjeux, derby) +
+            profil arbitre + cotes du marché + fatigue calendrier +
+            raisonnement Claude IA. Les probabilités reflètent le score
+            composite avant ajustement IA.
           </div>
         </div>
       )}

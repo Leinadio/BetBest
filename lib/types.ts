@@ -117,10 +117,68 @@ export interface TacticalProfile {
   penaltyRecord: { scored: number; missed: number };
 }
 
+export interface HeadToHeadMatch {
+  date: string;
+  homeTeam: string;
+  awayTeam: string;
+  homeGoals: number;
+  awayGoals: number;
+}
+
+export interface HeadToHeadRecord {
+  matches: HeadToHeadMatch[];
+  team1Wins: number;
+  draws: number;
+  team2Wins: number;
+}
+
+export interface RefereeProfile {
+  name: string;
+  matchesOfficiated: number;
+  avgYellowsPerMatch: number;
+  avgRedsPerMatch: number;
+  penaltiesAwarded: number;
+}
+
+export interface MatchOdds {
+  homeWin: number;
+  draw: number;
+  awayWin: number;
+  bookmaker: string;
+}
+
+export interface TeamFatigue {
+  daysSinceLastMatch: number | null;
+  daysUntilNextMatch: number | null;
+  matchesLast30Days: number;
+}
+
+export interface ScheduleFatigue {
+  home: TeamFatigue;
+  away: TeamFatigue;
+}
+
+export type Stakes = "title" | "europe" | "midtable" | "relegation";
+
+export interface MatchContext {
+  homeStakes: Stakes;
+  awayStakes: Stakes;
+  isDerby: boolean;
+}
+
+export interface PredictionAnalysis {
+  powerBalance: string;
+  momentum: string;
+  tacticalEdge: string;
+  contextualFactors: string;
+  verdict: string;
+}
+
 export interface Prediction {
   outcome: "1" | "N" | "2";
   confidence: number;
   reasoning: string;
+  analysis?: PredictionAnalysis;
   statsScore: StatsScore;
   homeTeam: Team;
   awayTeam: Team;
@@ -129,9 +187,15 @@ export interface Prediction {
   playerAnalysis: { home: TeamPlayerAnalysis; away: TeamPlayerAnalysis };
   news: { home: NewsArticle[]; away: NewsArticle[] };
   tactics?: { home: TacticalProfile | null; away: TacticalProfile | null };
+  headToHead?: HeadToHeadRecord;
+  referee?: RefereeProfile;
+  odds?: MatchOdds;
+  fatigue?: ScheduleFatigue;
+  matchContext?: MatchContext;
 }
 
 export const LEAGUES: League[] = [
+  { code: "CL", name: "Champions League", country: "Europe", flag: "🏆" },
   { code: "PL", name: "Premier League", country: "Angleterre", flag: "🏴󠁧󠁢󠁥󠁮󠁧󠁿" },
   { code: "PD", name: "La Liga", country: "Espagne", flag: "🇪🇸" },
   { code: "SA", name: "Serie A", country: "Italie", flag: "🇮🇹" },

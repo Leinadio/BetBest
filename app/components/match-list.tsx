@@ -68,15 +68,17 @@ export function MatchList({
                   {/* Équipe domicile */}
                   <div className="flex items-center gap-2 flex-1 justify-end">
                     <span className="text-sm font-medium text-white truncate text-right">
-                      {match.homeTeam.shortName}
+                      {match.homeTeam.shortName || match.homeTeam.tla || match.homeTeam.name}
                     </span>
-                    <Image
-                      src={match.homeTeam.crest}
-                      alt={match.homeTeam.name}
-                      width={24}
-                      height={24}
-                      className="shrink-0"
-                    />
+                    {match.homeTeam.crest && (
+                      <Image
+                        src={match.homeTeam.crest}
+                        alt={match.homeTeam.name}
+                        width={24}
+                        height={24}
+                        className="shrink-0"
+                      />
+                    )}
                   </div>
 
                   {/* Horaire */}
@@ -91,15 +93,17 @@ export function MatchList({
 
                   {/* Équipe extérieur */}
                   <div className="flex items-center gap-2 flex-1">
-                    <Image
-                      src={match.awayTeam.crest}
-                      alt={match.awayTeam.name}
-                      width={24}
-                      height={24}
-                      className="shrink-0"
-                    />
+                    {match.awayTeam.crest && (
+                      <Image
+                        src={match.awayTeam.crest}
+                        alt={match.awayTeam.name}
+                        width={24}
+                        height={24}
+                        className="shrink-0"
+                      />
+                    )}
                     <span className="text-sm font-medium text-white truncate">
-                      {match.awayTeam.shortName}
+                      {match.awayTeam.shortName || match.awayTeam.tla || match.awayTeam.name}
                     </span>
                   </div>
                 </button>

@@ -7,7 +7,7 @@ export async function GET(request: NextRequest) {
 
   if (!league || !LEAGUES.some((l) => l.code === league)) {
     return NextResponse.json(
-      { error: "Paramètre 'league' invalide. Valeurs : PL, PD, SA, BL1, FL1" },
+      { error: "Paramètre 'league' invalide. Valeurs : CL, PL, PD, SA, BL1, FL1" },
       { status: 400 }
     );
   }

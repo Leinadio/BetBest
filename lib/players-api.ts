@@ -256,6 +256,14 @@ export async function getRecentPlayerForm(
 
   if (fixtures.length === 0) return {};
 
+  // Check staleness: if the most recent fixture is > 45 days old, data is from a finished season
+  const now = new Date();
+  const staleCutoff = new Date(now.getTime() - 45 * 24 * 60 * 60 * 1000);
+  const latestDate = fixtures.reduce((max, f) => f.fixture.date > max ? f.fixture.date : max, "");
+  if (latestDate && new Date(latestDate) < staleCutoff) {
+    return {};
+  }
+
   // Trier par date croissante
   fixtures.sort(
     (a, b) => new Date(a.fixture.date).getTime() - new Date(b.fixture.date).getTime()

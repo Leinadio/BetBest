@@ -1,9 +1,10 @@
 import { analyzePrediction } from "@/lib/claude-analyzer";
-import { getRecentForm, getStandings } from "@/lib/football-api";
+import { getHeadToHead, getMatchScheduleData, getRecentForm, getStandings } from "@/lib/football-api";
 import { findTeamInjuries, getInjuries } from "@/lib/injuries-api";
 import { getTeamNews } from "@/lib/news-api";
 import { buildTeamPlayerAnalysis, findTeamKeyPlayers, findTeamPlayerForm, getKeyPlayers, getRecentPlayerForm } from "@/lib/players-api";
 import { calculateStats } from "@/lib/prediction-engine";
+import { getMatchContext, getMatchOdds, getRefereeStats } from "@/lib/match-context-api";
 import { getLeagueTeamIds, getTeamTactics, resolveApiFootballTeamId } from "@/lib/tactics-api";
 import { LEAGUES } from "@/lib/types";
 import { NextRequest, NextResponse } from "next/server";
@@ -35,13 +36,14 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const [standings, allInjuries, allKeyPlayers, formMap, allPlayerForms, teamIdMap] = await Promise.all([
+    const [standings, allInjuries, allKeyPlayers, formMap, allPlayerForms, teamIdMap, headToHead] = await Promise.all([
       getStandings(league),
       getInjuries(league),
       getKeyPlayers(league),
       getRecentForm(league),
       getRecentPlayerForm(league),
       getLeagueTeamIds(league),
+      getHeadToHead(league, homeTeamId, awayTeamId),
     ]);
 
     // Enrichir les standings avec la forme calculée
@@ -77,7 +79,8 @@ export async function POST(request: NextRequest) {
       homeInjuries,
       awayInjuries,
       homePlayerAnalysis.squadQualityScore,
-      awayPlayerAnalysis.squadQualityScore
+      awayPlayerAnalysis.squadQualityScore,
+      headToHead
     );
 
     const homePlayerForm = findTeamPlayerForm(allPlayerForms, homeStanding.team.name);
@@ -86,12 +89,23 @@ export async function POST(request: NextRequest) {
     const homeApiId = resolveApiFootballTeamId(teamIdMap, homeStanding.team.name);
     const awayApiId = resolveApiFootballTeamId(teamIdMap, awayStanding.team.name);
 
-    const [homeNews, awayNews, homeTactics, awayTactics] = await Promise.all([
+    const matchContext = getMatchContext(homeStanding, awayStanding, standings.length);
+
+    const [homeNews, awayNews, homeTactics, awayTactics, scheduleData, odds] = await Promise.all([
       getTeamNews(homeStanding.team.name),
       getTeamNews(awayStanding.team.name),
       homeApiId ? getTeamTactics(homeApiId, league) : Promise.resolve(null),
       awayApiId ? getTeamTactics(awayApiId, league) : Promise.resolve(null),
+      getMatchScheduleData(league, homeTeamId, awayTeamId),
+      getMatchOdds(league, homeStanding.team.name, awayStanding.team.name),
     ]);
+
+    const fatigue = scheduleData.fatigue;
+
+    // Referee: name from football-data.org, stats from API-Football (previous season)
+    const referee = scheduleData.refereeName
+      ? await getRefereeStats(league, scheduleData.refereeName)
+      : null;
 
     const prediction = await analyzePrediction({
       homeTeam: homeStanding.team,
@@ -110,6 +124,11 @@ export async function POST(request: NextRequest) {
       awayNews,
       homeTactics,
       awayTactics,
+      headToHead,
+      referee,
+      odds,
+      fatigue,
+      matchContext,
     });
 
     return NextResponse.json(prediction);

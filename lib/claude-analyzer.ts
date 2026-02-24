@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { Injury, NewsArticle, PlayerForm, Prediction, Standing, StatsScore, TacticalProfile, Team, TeamPlayerAnalysis } from "./types";
+import { HeadToHeadRecord, Injury, MatchContext, MatchOdds, NewsArticle, PlayerForm, Prediction, PredictionAnalysis, RefereeProfile, ScheduleFatigue, Standing, StatsScore, TacticalProfile, Team, TeamPlayerAnalysis } from "./types";
 
 const anthropic = new Anthropic();
 
@@ -20,6 +20,11 @@ interface AnalyzeParams {
   awayNews?: NewsArticle[];
   homeTactics?: TacticalProfile | null;
   awayTactics?: TacticalProfile | null;
+  headToHead?: HeadToHeadRecord;
+  referee?: RefereeProfile | null;
+  odds?: MatchOdds | null;
+  fatigue?: ScheduleFatigue | null;
+  matchContext?: MatchContext | null;
 }
 
 export async function analyzePrediction({
@@ -39,6 +44,11 @@ export async function analyzePrediction({
   awayNews,
   homeTactics,
   awayTactics,
+  headToHead,
+  referee,
+  odds,
+  fatigue,
+  matchContext,
 }: AnalyzeParams): Promise<Prediction> {
   const formatInjuries = (injuries: Injury[] | undefined): string => {
     if (!injuries || injuries.length === 0) return "Aucune absence signalée";
@@ -162,83 +172,178 @@ export async function analyzePrediction({
 - Penalties : ${tactics.penaltyRecord.scored} marqués, ${tactics.penaltyRecord.missed} ratés`;
   };
 
-  const prompt = `Tu es un expert en analyse de football. Analyse ce match et donne ta prédiction.
+  const formatHeadToHead = (h2h: HeadToHeadRecord | undefined): string => {
+    if (!h2h || h2h.matches.length === 0) return "Aucune confrontation directe cette saison";
+    const lines = h2h.matches.map((m) => {
+      const date = new Date(m.date).toLocaleDateString("fr-FR");
+      return `- ${m.homeTeam} ${m.homeGoals}-${m.awayGoals} ${m.awayTeam} (${date})`;
+    });
+    return `${lines.join("\n")}\nBilan : ${h2h.team1Wins}V ${h2h.draws}N ${h2h.team2Wins}D`;
+  };
 
-Match : ${homeTeam.name} (domicile) vs ${awayTeam.name} (extérieur)
+  const formatReferee = (ref: RefereeProfile | null | undefined): string => {
+    if (!ref) return "Arbitre : Données indisponibles";
+    return `Arbitre : ${ref.name}
+- Matchs arbitrés cette saison : ${ref.matchesOfficiated}
+- Moyenne cartons jaunes/match : ${ref.avgYellowsPerMatch}
+- Moyenne cartons rouges/match : ${ref.avgRedsPerMatch}
+- Penalties sifflés : ${ref.penaltiesAwarded}`;
+  };
+
+  const formatOdds = (o: MatchOdds | null | undefined): string => {
+    if (!o) return "Cotes : Données indisponibles";
+    return `Cotes (${o.bookmaker}) : Domicile ${o.homeWin} | Nul ${o.draw} | Extérieur ${o.awayWin}`;
+  };
+
+  const formatFatigue = (f: ScheduleFatigue | null | undefined): string => {
+    if (!f) return "Fatigue calendrier : Données indisponibles";
+    const fmt = (label: string, t: typeof f.home) => {
+      const parts: string[] = [];
+      if (t.daysSinceLastMatch !== null) parts.push(`dernier match il y a ${t.daysSinceLastMatch}j`);
+      if (t.daysUntilNextMatch !== null) parts.push(`prochain match dans ${t.daysUntilNextMatch}j`);
+      parts.push(`${t.matchesLast30Days} matchs sur 30 jours`);
+      return `${label} : ${parts.join(", ")}`;
+    };
+    return `${fmt(homeTeam.name, f.home)}\n${fmt(awayTeam.name, f.away)}`;
+  };
+
+  const stakesLabel: Record<string, string> = {
+    title: "Course au titre",
+    europe: "Course européenne",
+    midtable: "Mi-tableau",
+    relegation: "Lutte pour le maintien",
+  };
+
+  const formatMatchContext = (ctx: MatchContext | null | undefined): string => {
+    if (!ctx) return "Contexte du match : Données indisponibles";
+    const lines: string[] = [];
+    lines.push(`${homeTeam.name} : ${stakesLabel[ctx.homeStakes] ?? ctx.homeStakes}`);
+    lines.push(`${awayTeam.name} : ${stakesLabel[ctx.awayStakes] ?? ctx.awayStakes}`);
+    if (ctx.isDerby) lines.push("Ce match est un DERBY (rivalité historique)");
+    return lines.join("\n");
+  };
+
+  const systemPrompt = `Tu es un analyste football expert. Ta méthode est rigoureuse et reproductible : tu ne devines pas, tu déduis à partir des données. Si les données sont insuffisantes pour trancher, tu le dis et ta confiance reste basse (50-60). Tu réponds toujours en français.`;
+
+  const prompt = `Match : ${homeTeam.name} (domicile) vs ${awayTeam.name} (extérieur)
 Compétition : ${leagueCode}
 
-=== STATISTIQUES ===
-${homeTeam.name} :
-- Position : ${homeStanding.position}e
-- Points : ${homeStanding.points} (${homeStanding.playedGames} matchs)
-- Bilan : ${homeStanding.won}V ${homeStanding.draw}N ${homeStanding.lost}D
-- Buts : ${homeStanding.goalsFor} marqués, ${homeStanding.goalsAgainst} encaissés (diff: ${homeStanding.goalDifference > 0 ? "+" : ""}${homeStanding.goalDifference})
-- Forme récente : ${homeStanding.form ?? "N/A"}
+══════════════════════════════════
+DONNÉES DISPONIBLES
+══════════════════════════════════
 
-${awayTeam.name} :
-- Position : ${awayStanding.position}e
-- Points : ${awayStanding.points} (${awayStanding.playedGames} matchs)
-- Bilan : ${awayStanding.won}V ${awayStanding.draw}N ${awayStanding.lost}D
-- Buts : ${awayStanding.goalsFor} marqués, ${awayStanding.goalsAgainst} encaissés (diff: ${awayStanding.goalDifference > 0 ? "+" : ""}${awayStanding.goalDifference})
-- Forme récente : ${awayStanding.form ?? "N/A"}
+[CLASSEMENT]
+${homeTeam.name} : ${homeStanding.position}e — ${homeStanding.points} pts (${homeStanding.playedGames}J) — ${homeStanding.won}V ${homeStanding.draw}N ${homeStanding.lost}D — Buts: ${homeStanding.goalsFor}/${homeStanding.goalsAgainst} (diff: ${homeStanding.goalDifference > 0 ? "+" : ""}${homeStanding.goalDifference}) — Forme: ${homeStanding.form ?? "N/A"}
+${awayTeam.name} : ${awayStanding.position}e — ${awayStanding.points} pts (${awayStanding.playedGames}J) — ${awayStanding.won}V ${awayStanding.draw}N ${awayStanding.lost}D — Buts: ${awayStanding.goalsFor}/${awayStanding.goalsAgainst} (diff: ${awayStanding.goalDifference > 0 ? "+" : ""}${awayStanding.goalDifference}) — Forme: ${awayStanding.form ?? "N/A"}
 
-=== BLESSURES / SUSPENSIONS ===
-${homeTeam.name} :
-${formatInjuries(homeInjuries)}
+[BLESSURES / SUSPENSIONS]
+${homeTeam.name} : ${formatInjuries(homeInjuries)}
+${awayTeam.name} : ${formatInjuries(awayInjuries)}
 
-${awayTeam.name} :
-${formatInjuries(awayInjuries)}
-
-=== JOUEURS CLÉS (stats saison) ===
+[JOUEURS CLÉS]
 ${formatPlayerAnalysis(homeTeam.name, homePlayerAnalysis)}
-
 ${formatPlayerAnalysis(awayTeam.name, awayPlayerAnalysis)}
 
-=== FORME RÉCENTE DES JOUEURS (derniers matchs) ===
+[FORME RÉCENTE DES JOUEURS]
 ${formatRecentForm(homeTeam.name, homePlayerForm)}
-
 ${formatRecentForm(awayTeam.name, awayPlayerForm)}
 
-=== ACTUALITÉS RÉCENTES ===
+[ACTUALITÉS]
 ${formatNews(homeTeam.name, homeNews)}
-
 ${formatNews(awayTeam.name, awayNews)}
 
-=== ANALYSE TACTIQUE ===
+[TACTIQUE]
 ${formatTactics(homeTeam.name, homeTactics)}
-
 ${formatTactics(awayTeam.name, awayTactics)}
 
-=== MODÈLE STATISTIQUE (7 facteurs pondérés) ===
-${statsScore.factors.map((f) => `- ${f.label} (poids ${Math.round(f.weight * 100)}%) : ${f.homeValue} vs ${f.awayValue}`).join("\n")}
+[CONFRONTATIONS DIRECTES]
+${formatHeadToHead(headToHead)}
 
-Résultat du modèle :
-Victoire domicile (1) : ${statsScore.homeScore}%
-Match nul (N) : ${statsScore.drawScore}%
-Victoire extérieur (2) : ${statsScore.awayScore}%
+[ARBITRE]
+${formatReferee(referee)}
 
-INSTRUCTIONS D'ANALYSE :
-- Croise les données tactiques (bilans dom/ext, formations, distribution des buts par période) avec les statistiques générales
-- Identifie les matchups clés : équipe offensive vs défense solide, force à domicile vs faiblesse à l'extérieur
-- Prends en compte les absences de joueurs clés et leur impact sur le système tactique
-- Utilise les clean sheets, la distribution des buts par période et les séries pour évaluer la dynamique
+[COTES DU MARCHÉ]
+${formatOdds(odds)}
 
-Réponds UNIQUEMENT avec un JSON valide (sans markdown, sans backticks) dans ce format :
+[FATIGUE / CALENDRIER]
+${formatFatigue(fatigue)}
+
+[ENJEUX]
+${formatMatchContext(matchContext)}
+
+[MODÈLE STATISTIQUE — 8 facteurs pondérés]
+${statsScore.factors.map((f) => `${f.label} (${Math.round(f.weight * 100)}%) : ${f.homeValue} vs ${f.awayValue}`).join("\n")}
+→ Résultat : 1=${statsScore.homeScore}% N=${statsScore.drawScore}% 2=${statsScore.awayScore}%
+
+══════════════════════════════════
+MÉTHODE D'ANALYSE (suis ces 5 étapes dans l'ordre)
+══════════════════════════════════
+
+ÉTAPE 1 — RAPPORT DE FORCE
+En utilisant [CLASSEMENT] + [MODÈLE STATISTIQUE] :
+- Qui est objectivement supérieur sur la saison ? (position, points/match, diff. buts)
+- L'écart est-il large ou serré ?
+
+ÉTAPE 2 — DYNAMIQUE RÉCENTE
+En croisant [CLASSEMENT].forme + [FORME RÉCENTE DES JOUEURS] + [ACTUALITÉS] :
+- Les 5 derniers résultats confirment-ils ou contredisent-ils le rapport de force ?
+- Les joueurs clés sont-ils en forme ou en méforme ? (buts/passes récents vs stats saison)
+- Y a-t-il des news impactantes (changement coach, tension vestiaire, série historique) ?
+
+ÉTAPE 3 — CONFRONTATION TACTIQUE
+En croisant [TACTIQUE] des deux équipes + [CONFRONTATIONS DIRECTES] :
+- Comment la formation et le style de A interagissent-ils avec ceux de B ?
+  (ex: 4-3-3 offensif vs 5-3-2 compact, équipe qui marque en fin de match vs équipe qui encaisse tôt)
+- Les bilans dom/ext respectifs créent-ils un avantage ? (ex: fort à domicile vs faible à l'extérieur)
+- Les confrontations directes révèlent-elles une domination ou des matchs serrés ?
+
+ÉTAPE 4 — FACTEURS CONTEXTUELS
+En croisant ENSEMBLE [BLESSURES] × [JOUEURS CLÉS] × [FATIGUE] × [ENJEUX] × [ARBITRE] :
+- Quels facteurs CONVERGENT (pointent vers le même résultat) ?
+  (ex: équipe A reposée + joueurs clés dispo + course au titre = forte motivation et moyens)
+- Quels facteurs DIVERGENT (se contredisent) ?
+  (ex: équipe B en forme mais fatiguée et sans son buteur principal)
+- Un joueur clé absent change-t-il fondamentalement le rapport de force ?
+
+ÉTAPE 5 — VERDICT FINAL
+- Synthèse : sur la base des 4 étapes, quel résultat est le plus probable ?
+- Compare ton verdict aux cotes du marché. Si tu diverges significativement, explique quelles données justifient cet écart.
+- Ta confiance doit refléter la solidité des convergences : beaucoup de convergences = confiance haute (72-88), beaucoup de divergences = confiance basse (50-65). En football, une confiance >85 est exceptionnelle (réservée aux déséquilibres extrêmes).
+
+══════════════════════════════════
+FORMAT DE RÉPONSE
+══════════════════════════════════
+
+Réponds UNIQUEMENT avec un JSON valide (sans markdown, sans backticks) :
 {
-  "outcome": "1" | "N" | "2",
-  "confidence": <nombre entre 50 et 95>,
-  "reasoning": "<analyse en français, 3-4 phrases, mentionne les matchups tactiques, joueurs clés et absences importantes>"
+  "outcome": "1" ou "N" ou "2",
+  "confidence": nombre entre 50 et 88,
+  "analysis": {
+    "powerBalance": "1-2 phrases sur le rapport de force brut",
+    "momentum": "1-2 phrases sur la dynamique récente (forme + joueurs + news)",
+    "tacticalEdge": "1-2 phrases sur la confrontation tactique (styles + bilans dom/ext + H2H)",
+    "contextualFactors": "2-3 phrases : liste les convergences et divergences des facteurs contextuels (absences, fatigue, enjeux, arbitre)",
+    "verdict": "2-3 phrases : synthèse finale avec résultat choisi, justification principale, et positionnement par rapport aux cotes"
+  }
 }`;
 
   const message = await anthropic.messages.create({
     model: "claude-sonnet-4-20250514",
-    max_tokens: 500,
+    max_tokens: 1024,
+    temperature: 0,
+    system: systemPrompt,
     messages: [{ role: "user", content: prompt }],
   });
 
   const text = message.content[0].type === "text" ? message.content[0].text : "";
 
-  let parsed: { outcome: "1" | "N" | "2"; confidence: number; reasoning: string };
+  interface AnalysisResponse {
+    outcome: "1" | "N" | "2";
+    confidence: number;
+    analysis: PredictionAnalysis;
+  }
+
+  let parsed: AnalysisResponse;
   try {
     parsed = JSON.parse(text);
   } catch {
@@ -250,17 +355,29 @@ Réponds UNIQUEMENT avec un JSON valide (sans markdown, sans backticks) dans ce 
 
     parsed = {
       outcome,
-      confidence: Math.min(maxScore + 5, 90),
-      reasoning: "Prédiction basée sur les statistiques disponibles.",
+      confidence: Math.min(maxScore, 85),
+      analysis: {
+        powerBalance: "Analyse basée sur les statistiques disponibles.",
+        momentum: "",
+        tacticalEdge: "",
+        contextualFactors: "",
+        verdict: "Prédiction basée sur le modèle statistique.",
+      },
     };
   }
 
-  const defaultAnalysis = { keyPlayers: [], criticalAbsences: [], squadQualityScore: 0.5 };
+  const a = parsed.analysis;
+  const reasoning = [a.powerBalance, a.momentum, a.tacticalEdge, a.contextualFactors, a.verdict]
+    .filter(Boolean)
+    .join(" ");
+
+  const defaultPlayerAnalysis = { keyPlayers: [], criticalAbsences: [], squadQualityScore: 0.5 };
 
   return {
     outcome: parsed.outcome,
-    confidence: Math.max(50, Math.min(95, parsed.confidence)),
-    reasoning: parsed.reasoning,
+    confidence: Math.max(50, Math.min(88, parsed.confidence)),
+    reasoning,
+    analysis: parsed.analysis,
     statsScore,
     homeTeam,
     awayTeam,
@@ -270,8 +387,8 @@ Réponds UNIQUEMENT avec un JSON valide (sans markdown, sans backticks) dans ce 
       away: awayInjuries ?? [],
     },
     playerAnalysis: {
-      home: homePlayerAnalysis ?? defaultAnalysis,
-      away: awayPlayerAnalysis ?? defaultAnalysis,
+      home: homePlayerAnalysis ?? defaultPlayerAnalysis,
+      away: awayPlayerAnalysis ?? defaultPlayerAnalysis,
     },
     news: {
       home: homeNews ?? [],
@@ -281,5 +398,10 @@ Réponds UNIQUEMENT avec un JSON valide (sans markdown, sans backticks) dans ce 
       home: homeTactics ?? null,
       away: awayTactics ?? null,
     },
+    headToHead,
+    referee: referee ?? undefined,
+    odds: odds ?? undefined,
+    fatigue: fatigue ?? undefined,
+    matchContext: matchContext ?? undefined,
   };
 }

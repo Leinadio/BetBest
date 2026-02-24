@@ -58,13 +58,34 @@ export function PredictionCard({ prediction }: PredictionCardProps) {
       {/* Confidence */}
       <ConfidenceBar confidence={prediction.confidence} />
 
-      {/* Reasoning */}
-      <div className="rounded-lg bg-zinc-800 p-4">
-        <h4 className="text-sm font-medium text-zinc-400 mb-2">Analyse IA</h4>
-        <p className="text-sm text-zinc-200 leading-relaxed">
-          {prediction.reasoning}
-        </p>
-      </div>
+      {/* Structured Analysis */}
+      {prediction.analysis ? (
+        <div className="space-y-3">
+          {[
+            { key: "powerBalance" as const, title: "Rapport de force" },
+            { key: "momentum" as const, title: "Dynamique récente" },
+            { key: "tacticalEdge" as const, title: "Confrontation tactique" },
+            { key: "contextualFactors" as const, title: "Facteurs contextuels" },
+            { key: "verdict" as const, title: "Verdict" },
+          ].map(({ key, title }) => {
+            const text = prediction.analysis![key];
+            if (!text) return null;
+            return (
+              <div key={key} className={`rounded-lg p-3 ${key === "verdict" ? "bg-zinc-700 border border-zinc-600" : "bg-zinc-800"}`}>
+                <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-1">{title}</h4>
+                <p className="text-sm text-zinc-200 leading-relaxed">{text}</p>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="rounded-lg bg-zinc-800 p-4">
+          <h4 className="text-sm font-medium text-zinc-400 mb-2">Analyse IA</h4>
+          <p className="text-sm text-zinc-200 leading-relaxed">
+            {prediction.reasoning}
+          </p>
+        </div>
+      )}
 
       {/* Detailed analysis (collapsible) */}
       <AnalysisBreakdown prediction={prediction} />

@@ -1,20 +1,23 @@
-import { Injury, Standing, StatsScore } from "./types";
-
-function parseForm(form: string | null): { wins: number; draws: number; losses: number } {
-  if (!form) return { wins: 0, draws: 0, losses: 0 };
-  const results = form.split(",").map((r) => r.trim());
-  return {
-    wins: results.filter((r) => r === "W").length,
-    draws: results.filter((r) => r === "D").length,
-    losses: results.filter((r) => r === "L").length,
-  };
-}
+import { HeadToHeadRecord, Injury, Standing, StatsScore } from "./types";
 
 function formScore(form: string | null): number {
-  const { wins, draws, losses } = parseForm(form);
-  const total = wins + draws + losses;
-  if (total === 0) return 0.5;
-  return (wins * 3 + draws) / (total * 3);
+  if (!form) return 0.5;
+  const results = form.split(",").map((r) => r.trim());
+  if (results.length === 0) return 0.5;
+
+  // Recency weights: first result = most recent = heaviest weight
+  const weights = [0.30, 0.25, 0.20, 0.15, 0.10];
+  let weighted = 0;
+  let totalWeight = 0;
+
+  for (let i = 0; i < results.length; i++) {
+    const w = weights[i] ?? 0.10;
+    const pts = results[i] === "W" ? 1 : results[i] === "D" ? 0.33 : 0;
+    weighted += pts * w;
+    totalWeight += w;
+  }
+
+  return totalWeight > 0 ? weighted / totalWeight : 0.5;
 }
 
 export function calculateStats(
@@ -24,18 +27,19 @@ export function calculateStats(
   homeInjuries?: Injury[],
   awayInjuries?: Injury[],
   homeSquadQuality?: number,
-  awaySquadQuality?: number
+  awaySquadQuality?: number,
+  headToHead?: HeadToHeadRecord
 ): StatsScore {
   const factors: StatsScore["factors"] = [];
 
-  // 1. Position (20%) - lower position = better
+  // 1. Position (18%) - lower position = better
   const homePosScore = (totalTeams - homeStanding.position + 1) / totalTeams;
   const awayPosScore = (totalTeams - awayStanding.position + 1) / totalTeams;
   factors.push({
     label: "Position au classement",
     homeValue: `${homeStanding.position}e`,
     awayValue: `${awayStanding.position}e`,
-    weight: 0.20,
+    weight: 0.18,
   });
 
   // 2. Points per match (16%)
@@ -55,14 +59,14 @@ export function calculateStats(
     weight: 0.16,
   });
 
-  // 3. Form - last 5 matches (20%)
+  // 3. Form - last 5 matches (18%)
   const homeFormScore = formScore(homeStanding.form);
   const awayFormScore = formScore(awayStanding.form);
   factors.push({
     label: "Forme récente (5 matchs)",
     homeValue: homeStanding.form ?? "N/A",
     awayValue: awayStanding.form ?? "N/A",
-    weight: 0.20,
+    weight: 0.18,
   });
 
   // 4. Goal difference (12%)
@@ -113,51 +117,55 @@ export function calculateStats(
     weight: 0.08,
   });
 
+  // 8. Head-to-head record (4%)
+  const h2hTotal = headToHead ? headToHead.team1Wins + headToHead.draws + headToHead.team2Wins : 0;
+  const homeH2HScore = h2hTotal > 0 ? headToHead!.team1Wins / h2hTotal : 0.5;
+  const awayH2HScore = h2hTotal > 0 ? headToHead!.team2Wins / h2hTotal : 0.5;
+  factors.push({
+    label: "Confrontations directes",
+    homeValue: h2hTotal > 0 ? `${headToHead!.team1Wins}V ${headToHead!.draws}N ${headToHead!.team2Wins}D` : "N/A",
+    awayValue: h2hTotal > 0 ? `${headToHead!.team2Wins}V ${headToHead!.draws}N ${headToHead!.team1Wins}D` : "N/A",
+    weight: 0.04,
+  });
+
   // Weighted composite
   const homeTotal =
-    homePosScore * 0.20 +
+    homePosScore * 0.18 +
     homePPMScore * 0.16 +
-    homeFormScore * 0.20 +
+    homeFormScore * 0.18 +
     homeGDScore * 0.12 +
     homeAdvantage * 0.14 +
     homeInjScore * 0.10 +
-    homeSquadScore * 0.08;
+    homeSquadScore * 0.08 +
+    homeH2HScore * 0.04;
 
   const awayTotal =
-    awayPosScore * 0.20 +
+    awayPosScore * 0.18 +
     awayPPMScore * 0.16 +
-    awayFormScore * 0.20 +
+    awayFormScore * 0.18 +
     awayGDScore * 0.12 +
     awayAdvantage * 0.14 +
     awayInjScore * 0.10 +
-    awaySquadScore * 0.08;
+    awaySquadScore * 0.08 +
+    awayH2HScore * 0.04;
 
-  // Convert to 1/N/2 scores (normalized)
+  // Convert to 1/N/2 probabilities using realistic football distributions
   const diff = homeTotal - awayTotal;
-  const drawBand = 0.05; // if teams are very close, draw is more likely
 
-  let homeScore: number;
-  let drawScore: number;
-  let awayScore: number;
+  // Draw probability: Gaussian decay from 27% baseline (football average ~25-28%)
+  // Wider diff = less likely draw, but always >= 8%
+  let drawScore = Math.max(0.08, 0.27 * Math.exp(-4 * diff * diff));
 
-  if (Math.abs(diff) < drawBand) {
-    drawScore = 0.4;
-    homeScore = 0.35;
-    awayScore = 0.25;
-  } else if (diff > 0) {
-    homeScore = 0.4 + diff * 2;
-    drawScore = 0.3 - diff * 0.5;
-    awayScore = 1 - homeScore - drawScore;
-  } else {
-    awayScore = 0.4 + Math.abs(diff) * 2;
-    drawScore = 0.3 - Math.abs(diff) * 0.5;
-    homeScore = 1 - awayScore - drawScore;
-  }
+  // Remaining probability split using tanh for smooth, bounded favorite bias
+  const remaining = 1 - drawScore;
+  const favorBias = Math.tanh(diff * 2.5);
+  let homeScore = remaining * (0.5 + favorBias * 0.40);
+  let awayScore = remaining * (0.5 - favorBias * 0.40);
 
-  // Clamp values
+  // Safety clamp (should rarely trigger with this formula)
   homeScore = Math.max(0.05, Math.min(0.85, homeScore));
   awayScore = Math.max(0.05, Math.min(0.85, awayScore));
-  drawScore = Math.max(0.05, Math.min(0.85, drawScore));
+  drawScore = Math.max(0.08, Math.min(0.35, drawScore));
 
   // Renormalize
   const sum = homeScore + drawScore + awayScore;
