@@ -45,14 +45,23 @@ export async function analyzePrediction({
     const injured = injuries.filter((i) => !isSuspension(i.reason));
     const suspended = injuries.filter((i) => isSuspension(i.reason));
 
+    const formatEntry = (i: Injury) => {
+      const status = i.type || "Missing Fixture";
+      const statusLabel =
+        status === "Missing Fixture" ? "absent" :
+        status === "Doubtful" ? "incertain" :
+        status === "Questionable" ? "douteux" : status;
+      return `- ${i.player} (${i.reason ?? "non précisé"}) [${statusLabel}]`;
+    };
+
     const lines: string[] = [];
     if (injured.length > 0) {
       lines.push(`Blessés (${injured.length}) :`);
-      lines.push(...injured.map((i) => `- ${i.player} (${i.reason})`));
+      lines.push(...injured.map(formatEntry));
     }
     if (suspended.length > 0) {
       lines.push(`Suspendus (${suspended.length}) :`);
-      lines.push(...suspended.map((i) => `- ${i.player} (${i.reason})`));
+      lines.push(...suspended.map(formatEntry));
     }
     return lines.join("\n");
   };
@@ -118,7 +127,10 @@ ${formatPlayerAnalysis(homeTeam.name, homePlayerAnalysis)}
 
 ${formatPlayerAnalysis(awayTeam.name, awayPlayerAnalysis)}
 
-=== SCORES STATISTIQUES ===
+=== MODÈLE STATISTIQUE (7 facteurs pondérés) ===
+${statsScore.factors.map((f) => `- ${f.label} (poids ${Math.round(f.weight * 100)}%) : ${f.homeValue} vs ${f.awayValue}`).join("\n")}
+
+Résultat du modèle :
 Victoire domicile (1) : ${statsScore.homeScore}%
 Match nul (N) : ${statsScore.drawScore}%
 Victoire extérieur (2) : ${statsScore.awayScore}%
