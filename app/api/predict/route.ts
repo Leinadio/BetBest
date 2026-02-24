@@ -72,17 +72,6 @@ export async function POST(request: NextRequest) {
     const homePlayerAnalysis = buildTeamPlayerAnalysis(homeKeyPlayers, homeInjuries);
     const awayPlayerAnalysis = buildTeamPlayerAnalysis(awayKeyPlayers, awayInjuries);
 
-    const statsScore = calculateStats(
-      homeStanding,
-      awayStanding,
-      standings.length,
-      homeInjuries,
-      awayInjuries,
-      homePlayerAnalysis.squadQualityScore,
-      awayPlayerAnalysis.squadQualityScore,
-      headToHead
-    );
-
     const homePlayerForm = findTeamPlayerForm(allPlayerForms, homeStanding.team.name);
     const awayPlayerForm = findTeamPlayerForm(allPlayerForms, awayStanding.team.name);
 
@@ -106,6 +95,21 @@ export async function POST(request: NextRequest) {
     const referee = scheduleData.refereeName
       ? await getRefereeStats(league, scheduleData.refereeName)
       : null;
+
+    // Calculate stats AFTER tactics & fatigue are available
+    const statsScore = calculateStats(
+      homeStanding,
+      awayStanding,
+      standings.length,
+      homeInjuries,
+      awayInjuries,
+      homePlayerAnalysis.squadQualityScore,
+      awayPlayerAnalysis.squadQualityScore,
+      headToHead,
+      homeTactics,
+      awayTactics,
+      fatigue,
+    );
 
     const prediction = await analyzePrediction({
       homeTeam: homeStanding.team,
