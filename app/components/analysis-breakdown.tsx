@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Prediction, TeamPlayerAnalysis } from "@/lib/types";
+import { GoalsByPeriod, NewsArticle, Prediction, TacticalProfile, TeamPlayerAnalysis } from "@/lib/types";
 import Image from "next/image";
 
 interface AnalysisBreakdownProps {
@@ -345,6 +345,240 @@ function KeyPlayersCompact({
   );
 }
 
+function formatRelativeDate(pubDate: string): string {
+  const date = new Date(pubDate);
+  if (isNaN(date.getTime())) return "";
+  const daysAgo = Math.round((Date.now() - date.getTime()) / (1000 * 60 * 60 * 24));
+  if (daysAgo === 0) return "Aujourd'hui";
+  if (daysAgo === 1) return "Hier";
+  return `Il y a ${daysAgo}j`;
+}
+
+function NewsCompact({
+  homeNews,
+  awayNews,
+  homeTeamName,
+  awayTeamName,
+}: {
+  homeNews: NewsArticle[];
+  awayNews: NewsArticle[];
+  homeTeamName: string;
+  awayTeamName: string;
+}) {
+  const renderList = (name: string, articles: NewsArticle[]) => (
+    <div>
+      <div className="text-xs font-medium text-zinc-400 mb-1.5">{name}</div>
+      {articles.length === 0 ? (
+        <p className="text-[11px] text-zinc-600">Aucune actualité récente</p>
+      ) : (
+        <div className="space-y-1.5">
+          {articles.map((article, i) => (
+            <a
+              key={i}
+              href={article.link}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block group"
+            >
+              <div className="text-[11px] text-zinc-300 group-hover:text-zinc-100 transition-colors line-clamp-2 leading-tight">
+                {article.title}
+              </div>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                {article.source && (
+                  <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[9px] font-medium text-zinc-400">
+                    {article.source}
+                  </span>
+                )}
+                <span className="text-[10px] text-zinc-600">
+                  {formatRelativeDate(article.pubDate)}
+                </span>
+              </div>
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div>
+      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3">
+        Actualités récentes
+      </h5>
+      <div className="grid grid-cols-2 gap-4">
+        {renderList(homeTeamName, homeNews)}
+        {renderList(awayTeamName, awayNews)}
+      </div>
+    </div>
+  );
+}
+
+const PERIOD_LABELS = ["0-15", "16-30", "31-45", "46-60", "61-75", "76-90"] as const;
+
+function GoalsPeriodHeatmap({
+  goals,
+  label,
+  color,
+}: {
+  goals: GoalsByPeriod;
+  label: string;
+  color: "green" | "blue" | "red";
+}) {
+  const values = PERIOD_LABELS.map((p) => goals[p] ?? 0);
+  const max = Math.max(...values, 1);
+  const colorMap = {
+    green: { bg: "bg-green-500", text: "text-green-400" },
+    blue: { bg: "bg-blue-500", text: "text-blue-400" },
+    red: { bg: "bg-red-500", text: "text-red-400" },
+  };
+  const c = colorMap[color];
+
+  return (
+    <div>
+      <div className="text-[10px] text-zinc-500 mb-1">{label}</div>
+      <div className="flex gap-0.5">
+        {PERIOD_LABELS.map((period, i) => {
+          const opacity = values[i] > 0 ? 0.2 + (values[i] / max) * 0.8 : 0.05;
+          return (
+            <div key={period} className="flex-1 group relative">
+              <div
+                className={`h-5 rounded-sm ${c.bg}`}
+                style={{ opacity }}
+              />
+              <div className="absolute -top-6 left-1/2 -translate-x-1/2 hidden group-hover:block bg-zinc-900 border border-zinc-700 rounded px-1.5 py-0.5 text-[9px] text-zinc-300 whitespace-nowrap z-10">
+                {period}: {values[i]}
+              </div>
+              <div className="text-[8px] text-zinc-600 text-center mt-0.5">{period.split("-")[0]}&apos;</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function TacticsCompact({
+  homeTactics,
+  awayTactics,
+  homeTeamName,
+  awayTeamName,
+}: {
+  homeTactics: TacticalProfile | null;
+  awayTactics: TacticalProfile | null;
+  homeTeamName: string;
+  awayTeamName: string;
+}) {
+  const renderTeam = (
+    name: string,
+    tactics: TacticalProfile | null,
+    color: "green" | "blue"
+  ) => {
+    if (!tactics) {
+      return (
+        <div>
+          <div className="text-xs font-medium text-zinc-400 mb-1.5">{name}</div>
+          <p className="text-[11px] text-zinc-600">Données indisponibles</p>
+        </div>
+      );
+    }
+
+    const avgFor = parseFloat(tactics.goalsForAvg.total) || 0;
+    const avgAgainst = parseFloat(tactics.goalsAgainstAvg.total) || 0;
+
+    const styleBadges: { label: string; color: string }[] = [];
+    if (avgFor >= 2.0) styleBadges.push({ label: "Offensif", color: "bg-green-900 text-green-300" });
+    if (avgAgainst <= 1.0) styleBadges.push({ label: "Solide", color: "bg-blue-900 text-blue-300" });
+    if (avgFor < 1.0) styleBadges.push({ label: "Peu prolifique", color: "bg-orange-900 text-orange-300" });
+    if (avgAgainst >= 2.0) styleBadges.push({ label: "Perméable", color: "bg-red-900 text-red-300" });
+
+    const formationColor = color === "green" ? "bg-green-800 text-green-200" : "bg-blue-800 text-blue-200";
+    const record = color === "green" ? tactics.homeRecord : tactics.awayRecord;
+    const recordLabel = color === "green" ? "Dom" : "Ext";
+
+    return (
+      <div className="space-y-2">
+        <div className="text-xs font-medium text-zinc-400 mb-1.5">{name}</div>
+
+        {/* Formation */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${formationColor}`}>
+            {tactics.preferredFormation}
+          </span>
+          {tactics.formationUsage.slice(1, 3).map((f) => (
+            <span key={f.formation} className="rounded bg-zinc-800 px-1.5 py-0.5 text-[9px] text-zinc-500">
+              {f.formation} ({f.played})
+            </span>
+          ))}
+        </div>
+
+        {/* Bilan dom/ext */}
+        <div className="grid grid-cols-2 gap-1.5">
+          <div className="rounded bg-zinc-800/60 px-2 py-1">
+            <div className="text-[9px] text-zinc-500 uppercase">Dom</div>
+            <div className="text-[11px] text-zinc-300">
+              {tactics.homeRecord.wins}V {tactics.homeRecord.draws}N {tactics.homeRecord.losses}D
+            </div>
+          </div>
+          <div className="rounded bg-zinc-800/60 px-2 py-1">
+            <div className="text-[9px] text-zinc-500 uppercase">Ext</div>
+            <div className="text-[11px] text-zinc-300">
+              {tactics.awayRecord.wins}V {tactics.awayRecord.draws}N {tactics.awayRecord.losses}D
+            </div>
+          </div>
+        </div>
+
+        {/* Moyennes buts */}
+        <div className="flex items-center gap-2 text-[11px]">
+          <span className="text-zinc-500">Moy. buts :</span>
+          <span className="text-green-400">{tactics.goalsForAvg.total} M</span>
+          <span className="text-zinc-600">/</span>
+          <span className="text-red-400">{tactics.goalsAgainstAvg.total} E</span>
+        </div>
+
+        {/* Heatmap buts par période */}
+        <GoalsPeriodHeatmap goals={tactics.goalsForByPeriod} label="Buts marqués par période" color={color} />
+        <GoalsPeriodHeatmap goals={tactics.goalsAgainstByPeriod} label="Buts encaissés par période" color="red" />
+
+        {/* Stats badges */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[9px] text-zinc-400">
+            CS: {tactics.cleanSheets.total}
+          </span>
+          <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[9px] text-zinc-400">
+            0 but: {tactics.failedToScore.total}
+          </span>
+          <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[9px] text-zinc-400">
+            Série: {tactics.biggestStreak.wins}V
+          </span>
+        </div>
+
+        {/* Style badges */}
+        {styleBadges.length > 0 && (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {styleBadges.map((b) => (
+              <span key={b.label} className={`rounded px-1.5 py-0.5 text-[9px] font-medium ${b.color}`}>
+                {b.label}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3">
+        Profil tactique
+      </h5>
+      <div className="grid grid-cols-2 gap-4">
+        {renderTeam(homeTeamName, homeTactics, "green")}
+        {renderTeam(awayTeamName, awayTactics, "blue")}
+      </div>
+    </div>
+  );
+}
+
 function isSuspension(reason: string | undefined | null): boolean {
   const lower = (reason ?? "").toLowerCase();
   return (
@@ -441,7 +675,7 @@ function InjuriesCompact({
 export function AnalysisBreakdown({ prediction }: AnalysisBreakdownProps) {
   const [open, setOpen] = useState(false);
 
-  const { statsScore, homeTeam, awayTeam, playerAnalysis, injuries } =
+  const { statsScore, homeTeam, awayTeam, playerAnalysis, injuries, news, tactics } =
     prediction;
 
   return (
@@ -516,7 +750,31 @@ export function AnalysisBreakdown({ prediction }: AnalysisBreakdownProps) {
             <SectionUnavailable label="Top buteurs / passeurs" />
           )}
 
-          {/* 5. Injuries */}
+          {/* 5. News */}
+          {news && (news.home.length > 0 || news.away.length > 0) ? (
+            <NewsCompact
+              homeNews={news.home}
+              awayNews={news.away}
+              homeTeamName={homeTeam.shortName}
+              awayTeamName={awayTeam.shortName}
+            />
+          ) : (
+            <SectionUnavailable label="Actualités récentes" />
+          )}
+
+          {/* 5b. Tactics */}
+          {tactics && (tactics.home || tactics.away) ? (
+            <TacticsCompact
+              homeTactics={tactics.home}
+              awayTactics={tactics.away}
+              homeTeamName={homeTeam.shortName}
+              awayTeamName={awayTeam.shortName}
+            />
+          ) : (
+            <SectionUnavailable label="Profil tactique" />
+          )}
+
+          {/* 6. Injuries */}
           <InjuriesCompact
             homeInjuries={injuries.home}
             awayInjuries={injuries.away}
@@ -524,11 +782,12 @@ export function AnalysisBreakdown({ prediction }: AnalysisBreakdownProps) {
             awayTeamName={awayTeam.shortName}
           />
 
-          {/* 6. Methodology note */}
+          {/* 7. Methodology note */}
           <div className="rounded-lg bg-zinc-800/30 px-4 py-3 text-[11px] text-zinc-500 leading-relaxed">
             <span className="font-medium text-zinc-400">Méthodologie :</span>{" "}
             Moteur statistique (7 facteurs pondérés) + analyse des joueurs clés
             (top buteurs/passeurs de la ligue) croisée avec les blessures +
+            profils tactiques (formations, bilans dom/ext, distribution des buts) +
             raisonnement Claude IA. Les probabilités reflètent le score composite
             avant ajustement IA.
           </div>

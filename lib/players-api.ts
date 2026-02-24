@@ -1,5 +1,5 @@
 import { BASE_URL, getSeasonCandidates, LEAGUE_IDS, normalizeTeamName } from "./injuries-api";
-import { CriticalAbsence, Injury, KeyPlayer, TeamPlayerAnalysis } from "./types";
+import { CriticalAbsence, Injury, KeyPlayer, PlayerForm, TeamPlayerAnalysis } from "./types";
 
 interface APIPlayerEntry {
   player: {
@@ -202,4 +202,156 @@ export function buildTeamPlayerAnalysis(
   const criticalAbsences = identifyCriticalAbsences(keyPlayers, injuries);
   const squadQualityScore = computeSquadQualityScore(keyPlayers, criticalAbsences);
   return { keyPlayers, criticalAbsences, squadQualityScore };
+}
+
+// --- Forme récente des joueurs (via fixtures API-Football) ---
+
+interface APIFixtureEvent {
+  team: { name: string };
+  player: { id: number; name: string };
+  assist: { id: number | null; name: string | null };
+  type: string;
+  detail: string;
+}
+
+interface APIFixtureEntry {
+  fixture: { id: number; date: string };
+  teams: { home: { name: string }; away: { name: string } };
+  events: APIFixtureEvent[] | null;
+}
+
+interface APIFixturesResponse {
+  response: APIFixtureEntry[];
+}
+
+export async function getRecentPlayerForm(
+  leagueCode: string
+): Promise<Record<string, PlayerForm[]>> {
+  const apiKey = process.env.API_FOOTBALL_KEY;
+  if (!apiKey) return {};
+
+  const leagueId = LEAGUE_IDS[leagueCode];
+  if (!leagueId) return {};
+
+  const [current, fallback] = getSeasonCandidates();
+
+  let fixtures: APIFixtureEntry[] = [];
+  for (const season of [current, fallback]) {
+    const res = await fetch(
+      `${BASE_URL}/fixtures?league=${leagueId}&season=${season}&last=50`,
+      {
+        headers: { "x-apisports-key": apiKey },
+        next: { revalidate: 43200 },
+      }
+    );
+    if (!res.ok) continue;
+    const json = (await res.json()) as APIFixturesResponse;
+    if (json.response.length > 0) {
+      fixtures = json.response;
+      break;
+    }
+  }
+
+  if (fixtures.length === 0) return {};
+
+  // Trier par date croissante
+  fixtures.sort(
+    (a, b) => new Date(a.fixture.date).getTime() - new Date(b.fixture.date).getTime()
+  );
+
+  // Grouper les fixtures par équipe
+  const teamFixtures = new Map<string, APIFixtureEntry[]>();
+  for (const fixture of fixtures) {
+    for (const teamName of [fixture.teams.home.name, fixture.teams.away.name]) {
+      const key = normalizeTeamName(teamName);
+      const list = teamFixtures.get(key) ?? [];
+      list.push(fixture);
+      teamFixtures.set(key, list);
+    }
+  }
+
+  // Extraire buts/passes des 5 derniers matchs par équipe
+  const result: Record<string, PlayerForm[]> = {};
+
+  for (const [teamKey, teamFixtureList] of teamFixtures) {
+    const last5 = teamFixtureList.slice(-5);
+    const totalMatches = last5.length;
+    const playerStats = new Map<
+      string,
+      { goals: number; assists: number; matchIds: Set<number> }
+    >();
+
+    for (const fixture of last5) {
+      if (!fixture.events) continue;
+      for (const event of fixture.events) {
+        if (event.type !== "Goal" || event.detail === "Missed Penalty") continue;
+
+        const eventTeamKey = normalizeTeamName(event.team.name);
+        if (
+          eventTeamKey !== teamKey &&
+          !eventTeamKey.includes(teamKey) &&
+          !teamKey.includes(eventTeamKey)
+        )
+          continue;
+
+        if (event.player?.name) {
+          const stats = playerStats.get(event.player.name) ?? {
+            goals: 0,
+            assists: 0,
+            matchIds: new Set(),
+          };
+          stats.goals++;
+          stats.matchIds.add(fixture.fixture.id);
+          playerStats.set(event.player.name, stats);
+        }
+
+        if (event.assist?.name) {
+          const stats = playerStats.get(event.assist.name) ?? {
+            goals: 0,
+            assists: 0,
+            matchIds: new Set(),
+          };
+          stats.assists++;
+          stats.matchIds.add(fixture.fixture.id);
+          playerStats.set(event.assist.name, stats);
+        }
+      }
+    }
+
+    const forms: PlayerForm[] = Array.from(playerStats.entries())
+      .map(([name, stats]) => ({
+        name,
+        recentGoals: stats.goals,
+        recentAssists: stats.assists,
+        matchesWithContribution: stats.matchIds.size,
+        totalRecentMatches: totalMatches,
+      }))
+      .sort(
+        (a, b) =>
+          b.recentGoals + b.recentAssists - (a.recentGoals + a.recentAssists)
+      );
+
+    if (forms.length > 0) {
+      result[teamKey] = forms;
+    }
+  }
+
+  return result;
+}
+
+export function findTeamPlayerForm(
+  allForms: Record<string, PlayerForm[]>,
+  teamName: string
+): PlayerForm[] {
+  const normalized = normalizeTeamName(teamName);
+
+  if (allForms[normalized]) return allForms[normalized];
+
+  for (const [key, forms] of Object.entries(allForms)) {
+    if (key.includes(normalized) || normalized.includes(key)) {
+      return forms;
+    }
+  }
+
+  return [];
 }

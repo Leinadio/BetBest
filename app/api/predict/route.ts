@@ -1,8 +1,10 @@
 import { analyzePrediction } from "@/lib/claude-analyzer";
 import { getRecentForm, getStandings } from "@/lib/football-api";
 import { findTeamInjuries, getInjuries } from "@/lib/injuries-api";
-import { buildTeamPlayerAnalysis, findTeamKeyPlayers, getKeyPlayers } from "@/lib/players-api";
+import { getTeamNews } from "@/lib/news-api";
+import { buildTeamPlayerAnalysis, findTeamKeyPlayers, findTeamPlayerForm, getKeyPlayers, getRecentPlayerForm } from "@/lib/players-api";
 import { calculateStats } from "@/lib/prediction-engine";
+import { getLeagueTeamIds, getTeamTactics, resolveApiFootballTeamId } from "@/lib/tactics-api";
 import { LEAGUES } from "@/lib/types";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -33,11 +35,13 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const [standings, allInjuries, allKeyPlayers, formMap] = await Promise.all([
+    const [standings, allInjuries, allKeyPlayers, formMap, allPlayerForms, teamIdMap] = await Promise.all([
       getStandings(league),
       getInjuries(league),
       getKeyPlayers(league),
       getRecentForm(league),
+      getRecentPlayerForm(league),
+      getLeagueTeamIds(league),
     ]);
 
     // Enrichir les standings avec la forme calculée
@@ -76,6 +80,19 @@ export async function POST(request: NextRequest) {
       awayPlayerAnalysis.squadQualityScore
     );
 
+    const homePlayerForm = findTeamPlayerForm(allPlayerForms, homeStanding.team.name);
+    const awayPlayerForm = findTeamPlayerForm(allPlayerForms, awayStanding.team.name);
+
+    const homeApiId = resolveApiFootballTeamId(teamIdMap, homeStanding.team.name);
+    const awayApiId = resolveApiFootballTeamId(teamIdMap, awayStanding.team.name);
+
+    const [homeNews, awayNews, homeTactics, awayTactics] = await Promise.all([
+      getTeamNews(homeStanding.team.name),
+      getTeamNews(awayStanding.team.name),
+      homeApiId ? getTeamTactics(homeApiId, league) : Promise.resolve(null),
+      awayApiId ? getTeamTactics(awayApiId, league) : Promise.resolve(null),
+    ]);
+
     const prediction = await analyzePrediction({
       homeTeam: homeStanding.team,
       awayTeam: awayStanding.team,
@@ -87,6 +104,12 @@ export async function POST(request: NextRequest) {
       awayInjuries,
       homePlayerAnalysis,
       awayPlayerAnalysis,
+      homePlayerForm,
+      awayPlayerForm,
+      homeNews,
+      awayNews,
+      homeTactics,
+      awayTactics,
     });
 
     return NextResponse.json(prediction);

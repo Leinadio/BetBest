@@ -76,6 +76,47 @@ export interface TeamPlayerAnalysis {
   squadQualityScore: number;
 }
 
+export interface PlayerForm {
+  name: string;
+  recentGoals: number;
+  recentAssists: number;
+  matchesWithContribution: number;
+  totalRecentMatches: number;
+}
+
+export interface NewsArticle {
+  title: string;
+  source: string;
+  pubDate: string;
+  link: string;
+}
+
+export interface GoalsByPeriod {
+  "0-15": number | null;
+  "16-30": number | null;
+  "31-45": number | null;
+  "46-60": number | null;
+  "61-75": number | null;
+  "76-90": number | null;
+}
+
+export interface TacticalProfile {
+  teamName: string;
+  form: string;
+  preferredFormation: string;
+  formationUsage: { formation: string; played: number }[];
+  homeRecord: { played: number; wins: number; draws: number; losses: number };
+  awayRecord: { played: number; wins: number; draws: number; losses: number };
+  goalsForAvg: { home: string; away: string; total: string };
+  goalsAgainstAvg: { home: string; away: string; total: string };
+  goalsForByPeriod: GoalsByPeriod;
+  goalsAgainstByPeriod: GoalsByPeriod;
+  cleanSheets: { home: number; away: number; total: number };
+  failedToScore: { home: number; away: number; total: number };
+  biggestStreak: { wins: number; draws: number; losses: number };
+  penaltyRecord: { scored: number; missed: number };
+}
+
 export interface Prediction {
   outcome: "1" | "N" | "2";
   confidence: number;
@@ -86,6 +127,8 @@ export interface Prediction {
   league: string;
   injuries: { home: Injury[]; away: Injury[] };
   playerAnalysis: { home: TeamPlayerAnalysis; away: TeamPlayerAnalysis };
+  news: { home: NewsArticle[]; away: NewsArticle[] };
+  tactics?: { home: TacticalProfile | null; away: TacticalProfile | null };
 }
 
 export const LEAGUES: League[] = [

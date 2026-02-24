@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { Injury, Prediction, Standing, StatsScore, Team, TeamPlayerAnalysis } from "./types";
+import { Injury, NewsArticle, PlayerForm, Prediction, Standing, StatsScore, TacticalProfile, Team, TeamPlayerAnalysis } from "./types";
 
 const anthropic = new Anthropic();
 
@@ -14,6 +14,12 @@ interface AnalyzeParams {
   awayInjuries?: Injury[];
   homePlayerAnalysis?: TeamPlayerAnalysis;
   awayPlayerAnalysis?: TeamPlayerAnalysis;
+  homePlayerForm?: PlayerForm[];
+  awayPlayerForm?: PlayerForm[];
+  homeNews?: NewsArticle[];
+  awayNews?: NewsArticle[];
+  homeTactics?: TacticalProfile | null;
+  awayTactics?: TacticalProfile | null;
 }
 
 export async function analyzePrediction({
@@ -27,6 +33,12 @@ export async function analyzePrediction({
   awayInjuries,
   homePlayerAnalysis,
   awayPlayerAnalysis,
+  homePlayerForm,
+  awayPlayerForm,
+  homeNews,
+  awayNews,
+  homeTactics,
+  awayTactics,
 }: AnalyzeParams): Promise<Prediction> {
   const formatInjuries = (injuries: Injury[] | undefined): string => {
     if (!injuries || injuries.length === 0) return "Aucune absence signalée";
@@ -95,6 +107,61 @@ export async function analyzePrediction({
     return `${teamName} (score effectif: ${Math.round(analysis.squadQualityScore * 100)}%) :\n${players}${absences}`;
   };
 
+  const formatRecentForm = (teamName: string, forms: PlayerForm[] | undefined): string => {
+    if (!forms || forms.length === 0)
+      return `${teamName} : Données indisponibles`;
+    const total = forms[0].totalRecentMatches;
+    const lines = forms.slice(0, 8).map((p) => {
+      const parts: string[] = [];
+      if (p.recentGoals > 0) parts.push(`${p.recentGoals} but${p.recentGoals > 1 ? "s" : ""}`);
+      if (p.recentAssists > 0) parts.push(`${p.recentAssists} passe${p.recentAssists > 1 ? "s" : ""}`);
+      return `- ${p.name} : ${parts.join(", ")} (actif ${p.matchesWithContribution}/${total} matchs)`;
+    });
+    return `${teamName} (${total} derniers matchs) :\n${lines.join("\n")}`;
+  };
+
+  const formatNews = (teamName: string, articles: NewsArticle[] | undefined): string => {
+    if (!articles || articles.length === 0) return `${teamName} : Aucune actualité récente`;
+    const lines = articles.map((a) => {
+      const date = new Date(a.pubDate);
+      const daysAgo = Math.round((Date.now() - date.getTime()) / (1000 * 60 * 60 * 24));
+      const relative = daysAgo === 0 ? "aujourd'hui" : daysAgo === 1 ? "hier" : `il y a ${daysAgo} jours`;
+      const src = a.source ? ` (${a.source}, ${relative})` : ` (${relative})`;
+      return `- "${a.title}"${src}`;
+    });
+    return `${teamName} :\n${lines.join("\n")}`;
+  };
+
+  const formatTactics = (teamName: string, tactics: TacticalProfile | null | undefined): string => {
+    if (!tactics) return `${teamName} : Données tactiques indisponibles`;
+
+    const formations = tactics.formationUsage
+      .slice(0, 3)
+      .map((f) => `${f.formation}: ${f.played} matchs`)
+      .join(", ");
+
+    const periods = Object.entries(tactics.goalsForByPeriod)
+      .map(([p, v]) => `${p}: ${v ?? 0}`)
+      .join(", ");
+
+    const periodsAgainst = Object.entries(tactics.goalsAgainstByPeriod)
+      .map(([p, v]) => `${p}: ${v ?? 0}`)
+      .join(", ");
+
+    return `${teamName} :
+- Formation préférée : ${tactics.preferredFormation} (${formations})
+- Bilan domicile : ${tactics.homeRecord.wins}V ${tactics.homeRecord.draws}N ${tactics.homeRecord.losses}D (${tactics.homeRecord.played} matchs)
+- Bilan extérieur : ${tactics.awayRecord.wins}V ${tactics.awayRecord.draws}N ${tactics.awayRecord.losses}D (${tactics.awayRecord.played} matchs)
+- Moyenne buts marqués : ${tactics.goalsForAvg.home} (dom) / ${tactics.goalsForAvg.away} (ext) / ${tactics.goalsForAvg.total} (total)
+- Moyenne buts encaissés : ${tactics.goalsAgainstAvg.home} (dom) / ${tactics.goalsAgainstAvg.away} (ext) / ${tactics.goalsAgainstAvg.total} (total)
+- Buts marqués par période : ${periods}
+- Buts encaissés par période : ${periodsAgainst}
+- Clean sheets : ${tactics.cleanSheets.total} (${tactics.cleanSheets.home} dom, ${tactics.cleanSheets.away} ext)
+- Matchs sans marquer : ${tactics.failedToScore.total} (${tactics.failedToScore.home} dom, ${tactics.failedToScore.away} ext)
+- Meilleure série : ${tactics.biggestStreak.wins}V, ${tactics.biggestStreak.draws}N, ${tactics.biggestStreak.losses}D
+- Penalties : ${tactics.penaltyRecord.scored} marqués, ${tactics.penaltyRecord.missed} ratés`;
+  };
+
   const prompt = `Tu es un expert en analyse de football. Analyse ce match et donne ta prédiction.
 
 Match : ${homeTeam.name} (domicile) vs ${awayTeam.name} (extérieur)
@@ -122,10 +189,25 @@ ${formatInjuries(homeInjuries)}
 ${awayTeam.name} :
 ${formatInjuries(awayInjuries)}
 
-=== JOUEURS CLÉS ===
+=== JOUEURS CLÉS (stats saison) ===
 ${formatPlayerAnalysis(homeTeam.name, homePlayerAnalysis)}
 
 ${formatPlayerAnalysis(awayTeam.name, awayPlayerAnalysis)}
+
+=== FORME RÉCENTE DES JOUEURS (derniers matchs) ===
+${formatRecentForm(homeTeam.name, homePlayerForm)}
+
+${formatRecentForm(awayTeam.name, awayPlayerForm)}
+
+=== ACTUALITÉS RÉCENTES ===
+${formatNews(homeTeam.name, homeNews)}
+
+${formatNews(awayTeam.name, awayNews)}
+
+=== ANALYSE TACTIQUE ===
+${formatTactics(homeTeam.name, homeTactics)}
+
+${formatTactics(awayTeam.name, awayTactics)}
 
 === MODÈLE STATISTIQUE (7 facteurs pondérés) ===
 ${statsScore.factors.map((f) => `- ${f.label} (poids ${Math.round(f.weight * 100)}%) : ${f.homeValue} vs ${f.awayValue}`).join("\n")}
@@ -184,6 +266,14 @@ Réponds UNIQUEMENT avec un JSON valide (sans markdown, sans backticks) dans ce 
     playerAnalysis: {
       home: homePlayerAnalysis ?? defaultAnalysis,
       away: awayPlayerAnalysis ?? defaultAnalysis,
+    },
+    news: {
+      home: homeNews ?? [],
+      away: awayNews ?? [],
+    },
+    tactics: {
+      home: homeTactics ?? null,
+      away: awayTactics ?? null,
     },
   };
 }
