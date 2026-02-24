@@ -1,5 +1,5 @@
 import { analyzePrediction } from "@/lib/claude-analyzer";
-import { getStandings } from "@/lib/football-api";
+import { getRecentForm, getStandings } from "@/lib/football-api";
 import { findTeamInjuries, getInjuries } from "@/lib/injuries-api";
 import { buildTeamPlayerAnalysis, findTeamKeyPlayers, getKeyPlayers } from "@/lib/players-api";
 import { calculateStats } from "@/lib/prediction-engine";
@@ -33,11 +33,19 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const [standings, allInjuries, allKeyPlayers] = await Promise.all([
+    const [standings, allInjuries, allKeyPlayers, formMap] = await Promise.all([
       getStandings(league),
       getInjuries(league),
       getKeyPlayers(league),
+      getRecentForm(league),
     ]);
+
+    // Enrichir les standings avec la forme calculée
+    for (const s of standings) {
+      if (!s.form) {
+        s.form = formMap.get(s.team.id) ?? null;
+      }
+    }
 
     const homeStanding = standings.find((s) => s.team.id === homeTeamId);
     const awayStanding = standings.find((s) => s.team.id === awayTeamId);

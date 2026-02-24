@@ -30,7 +30,31 @@ export async function analyzePrediction({
 }: AnalyzeParams): Promise<Prediction> {
   const formatInjuries = (injuries: Injury[] | undefined): string => {
     if (!injuries || injuries.length === 0) return "Aucune absence signalée";
-    return injuries.map((i) => `- ${i.player} (${i.reason})`).join("\n");
+
+    const isSuspension = (reason: string | undefined | null) => {
+      const lower = (reason ?? "").toLowerCase();
+      return (
+        lower.includes("suspend") ||
+        lower.includes("red card") ||
+        lower.includes("yellow card") ||
+        lower.includes("carton") ||
+        lower.includes("expuls")
+      );
+    };
+
+    const injured = injuries.filter((i) => !isSuspension(i.reason));
+    const suspended = injuries.filter((i) => isSuspension(i.reason));
+
+    const lines: string[] = [];
+    if (injured.length > 0) {
+      lines.push(`Blessés (${injured.length}) :`);
+      lines.push(...injured.map((i) => `- ${i.player} (${i.reason})`));
+    }
+    if (suspended.length > 0) {
+      lines.push(`Suspendus (${suspended.length}) :`);
+      lines.push(...suspended.map((i) => `- ${i.player} (${i.reason})`));
+    }
+    return lines.join("\n");
   };
 
   const formatPlayerAnalysis = (

@@ -345,38 +345,85 @@ function KeyPlayersCompact({
   );
 }
 
+function isSuspension(reason: string | undefined | null): boolean {
+  const lower = (reason ?? "").toLowerCase();
+  return (
+    lower.includes("suspend") ||
+    lower.includes("red card") ||
+    lower.includes("yellow card") ||
+    lower.includes("carton") ||
+    lower.includes("expuls")
+  );
+}
+
 function InjuriesCompact({
   homeInjuries,
   awayInjuries,
   homeTeamName,
   awayTeamName,
 }: {
-  homeInjuries: { player: string; reason: string }[];
-  awayInjuries: { player: string; reason: string }[];
+  homeInjuries: { player: string; type: string; reason: string }[];
+  awayInjuries: { player: string; type: string; reason: string }[];
   homeTeamName: string;
   awayTeamName: string;
 }) {
   const renderList = (
     name: string,
-    injuries: { player: string; reason: string }[]
-  ) => (
-    <div>
-      <div className="text-xs font-medium text-zinc-400 mb-1">{name}</div>
-      {injuries.length === 0 ? (
-        <p className="text-[11px] text-zinc-600">Aucune absence</p>
-      ) : (
-        <div className="space-y-0.5">
-          {injuries.map((inj, i) => (
-            <div key={i} className="flex items-center gap-1.5 text-[11px]">
-              <span className="text-red-500 text-[10px]">&#x2716;</span>
-              <span className="text-zinc-300">{inj.player}</span>
-              <span className="text-zinc-600">({inj.reason})</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+    injuries: { player: string; type: string; reason: string }[]
+  ) => {
+    const suspended = injuries.filter((inj) => isSuspension(inj.reason));
+    const injured = injuries.filter((inj) => !isSuspension(inj.reason));
+
+    return (
+      <div>
+        <div className="text-xs font-medium text-zinc-400 mb-1.5">{name}</div>
+        {injuries.length === 0 ? (
+          <p className="text-[11px] text-zinc-600">Aucune absence</p>
+        ) : (
+          <div className="space-y-2">
+            {injured.length > 0 && (
+              <div>
+                <div className="flex items-center gap-1 mb-1">
+                  <span className="text-[10px]">&#x1F3E5;</span>
+                  <span className="text-[10px] font-medium text-red-400 uppercase tracking-wide">
+                    Blessés ({injured.length})
+                  </span>
+                </div>
+                <div className="space-y-0.5">
+                  {injured.map((inj, i) => (
+                    <div key={i} className="flex items-center gap-1.5 text-[11px]">
+                      <span className="text-red-500 text-[10px]">&#x2716;</span>
+                      <span className="text-zinc-300">{inj.player}</span>
+                      <span className="text-zinc-600">({inj.reason})</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {suspended.length > 0 && (
+              <div>
+                <div className="flex items-center gap-1 mb-1">
+                  <span className="text-[10px]">&#x1F7E5;</span>
+                  <span className="text-[10px] font-medium text-yellow-400 uppercase tracking-wide">
+                    Suspendus ({suspended.length})
+                  </span>
+                </div>
+                <div className="space-y-0.5">
+                  {suspended.map((inj, i) => (
+                    <div key={i} className="flex items-center gap-1.5 text-[11px]">
+                      <span className="text-yellow-500 text-[10px]">&#x26A0;</span>
+                      <span className="text-zinc-300">{inj.player}</span>
+                      <span className="text-zinc-600">({inj.reason})</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div>

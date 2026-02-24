@@ -74,6 +74,51 @@ export async function getStandings(leagueCode: string): Promise<Standing[]> {
   }));
 }
 
+interface FinishedMatchesResponse {
+  matches: {
+    utcDate: string;
+    homeTeam: { id: number };
+    awayTeam: { id: number };
+    score: {
+      fullTime: { home: number | null; away: number | null };
+    };
+  }[];
+}
+
+export async function getRecentForm(
+  leagueCode: string
+): Promise<Map<number, string>> {
+  const data = await fetchAPI<FinishedMatchesResponse>(
+    `/competitions/${leagueCode}/matches?status=FINISHED`
+  );
+
+  // Collecter les résultats par équipe (triés par date croissante par l'API)
+  const teamResults = new Map<number, string[]>();
+
+  for (const m of data.matches) {
+    const homeGoals = m.score.fullTime.home;
+    const awayGoals = m.score.fullTime.away;
+    if (homeGoals === null || awayGoals === null) continue;
+
+    const homeResult = homeGoals > awayGoals ? "W" : homeGoals < awayGoals ? "L" : "D";
+    const awayResult = awayGoals > homeGoals ? "W" : awayGoals < homeGoals ? "L" : "D";
+
+    if (!teamResults.has(m.homeTeam.id)) teamResults.set(m.homeTeam.id, []);
+    teamResults.get(m.homeTeam.id)!.push(homeResult);
+
+    if (!teamResults.has(m.awayTeam.id)) teamResults.set(m.awayTeam.id, []);
+    teamResults.get(m.awayTeam.id)!.push(awayResult);
+  }
+
+  // Garder les 5 derniers résultats par équipe
+  const formMap = new Map<number, string>();
+  for (const [teamId, results] of teamResults) {
+    formMap.set(teamId, results.slice(-5).join(","));
+  }
+
+  return formMap;
+}
+
 interface MatchesResponse {
   matches: {
     id: number;
