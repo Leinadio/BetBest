@@ -1,3 +1,5 @@
+import { InfoButton } from "./info-button";
+
 interface ConfidenceBarProps {
   confidence: number;
 }
@@ -13,7 +15,13 @@ export function ConfidenceBar({ confidence }: ConfidenceBarProps) {
   return (
     <div className="w-full">
       <div className="flex justify-between text-sm mb-1">
-        <span className="text-zinc-400">Confiance</span>
+        <span className="text-zinc-400 flex items-center">
+          Confiance
+          <InfoButton
+            title="Indice de confiance"
+            description="Indique à quel point le modèle est sûr de sa prédiction. 75%+ (vert) = forte conviction, 60-74% (orange) = conviction modérée, &lt;60% (rouge) = match incertain. Basé sur l'écart entre les probabilités des 3 issues."
+          />
+        </span>
         <span className="font-semibold text-white">{confidence}%</span>
       </div>
       <div className="h-3 w-full rounded-full bg-zinc-700 overflow-hidden">

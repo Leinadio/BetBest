@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { GoalsByPeriod, HeadToHeadRecord, MatchContext, MatchOdds, NewsArticle, Prediction, RefereeProfile, ScheduleFatigue, TacticalProfile, TeamElo, TeamPlayerAnalysis, TeamXG } from "@/lib/types";
 import Image from "next/image";
+import { InfoButton } from "./info-button";
 
 interface AnalysisBreakdownProps {
   prediction: Prediction;
@@ -143,8 +144,12 @@ function SquadQualityComparison({
 
   return (
     <div className="space-y-3">
-      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide">
+      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide flex items-center">
         Qualité des effectifs
+        <InfoButton
+          title="Qualité des effectifs"
+          description="Score basé sur le nombre de joueurs clés (top buteurs et passeurs de la ligue) dans chaque équipe et leurs contributions (buts + passes). Les absences critiques (blessure/suspension d'un joueur clé) sont signalées avec leur impact estimé."
+        />
       </h5>
       <div className="grid grid-cols-2 gap-3">
         {[
@@ -334,8 +339,12 @@ function KeyPlayersCompact({
 
   return (
     <div>
-      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3">
+      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3 flex items-center">
         Top buteurs / passeurs de la ligue
+        <InfoButton
+          title="Joueurs clés"
+          description="Joueurs figurant parmi les meilleurs buteurs (B) et/ou passeurs (P) de la ligue. Un joueur barré en rouge est absent (blessé ou suspendu). B+P = joueur décisif en buts et passes."
+        />
       </h5>
       <div className="grid grid-cols-2 gap-4">
         {renderTeam(homeTeamName, homeAnalysis, "left")}
@@ -402,8 +411,12 @@ function NewsCompact({
 
   return (
     <div>
-      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3">
+      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3 flex items-center">
         Actualités récentes
+        <InfoButton
+          title="Actualités récentes"
+          description="Dernières actualités concernant chaque équipe. Changement d'entraîneur, tensions internes, ou dynamique positive peuvent influencer la performance au-delà des statistiques."
+        />
       </h5>
       <div className="grid grid-cols-2 gap-4">
         {renderList(homeTeamName, homeNews)}
@@ -562,8 +575,12 @@ function TacticsCompact({
 
   return (
     <div>
-      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3">
+      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3 flex items-center">
         Profil tactique
+        <InfoButton
+          title="Profil tactique"
+          description="Formation préférée, bilan domicile/extérieur, moyenne de buts marqués (M) et encaissés (E) par match. CS = Clean Sheet (match sans but encaissé). La heatmap montre les périodes où l'équipe marque ou encaisse le plus."
+        />
       </h5>
       <div className="grid grid-cols-2 gap-4">
         {renderTeam(homeTeamName, homeTactics, "green")}
@@ -586,8 +603,12 @@ function HeadToHeadCompact({
 
   return (
     <div>
-      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3">
+      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3 flex items-center">
         Confrontations directes
+        <InfoButton
+          title="Confrontations directes (H2H)"
+          description="Historique des matchs récents entre les deux équipes (Head-to-Head). Montre les victoires, nuls et défaites de chaque côté, ainsi que les scores des dernières rencontres."
+        />
       </h5>
 
       {/* Bilan résumé */}
@@ -679,8 +700,12 @@ function MatchContextCompact({
 
   return (
     <div>
-      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3">
+      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3 flex items-center">
         Contexte du match
+        <InfoButton
+          title="Contexte du match"
+          description="Enjeux pour chaque équipe : course au titre, qualification européenne, maintien en division, ou mi-tableau. Un derby (rivalité locale) augmente l'intensité et l'imprévisibilité du match."
+        />
       </h5>
       <div className="flex items-center gap-2 flex-wrap">
         <div className="flex items-center gap-1.5">
@@ -718,8 +743,12 @@ function RefereeCompact({ referee }: { referee: RefereeProfile }) {
 
   return (
     <div>
-      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3">
+      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3 flex items-center">
         Arbitre
+        <InfoButton
+          title="Profil de l'arbitre"
+          description="Statistiques de l'arbitre désigné : cartons jaunes/rouges par match et penalties sifflés. Un arbitre 'Sévère' (5+ jaunes/match) peut impacter le jeu des équipes agressives."
+        />
       </h5>
       <div className="rounded-lg bg-zinc-800/40 px-4 py-3">
         <div className="flex items-center justify-between mb-2">
@@ -790,8 +819,12 @@ function OddsCompact({
 
   return (
     <div>
-      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3">
+      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3 flex items-center">
         Cotes du marché
+        <InfoButton
+          title="Cotes du marché"
+          description="Cotes des bookmakers converties en probabilités implicites. 'Modèle vs Marché' montre l'écart entre notre estimation et celle du marché. Un écart positif = notre modèle est plus optimiste que les bookmakers."
+        />
       </h5>
       <div className="rounded-lg bg-zinc-800/40 px-4 py-3 space-y-3">
         {/* Cotes brutes */}
@@ -915,8 +948,12 @@ function FatigueCompact({
 
   return (
     <div>
-      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3">
+      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3 flex items-center">
         Fatigue / Calendrier
+        <InfoButton
+          title="Fatigue / Calendrier"
+          description="Jours de repos depuis le dernier match, prochain match prévu, et charge (nombre de matchs joués sur 30 jours). Une équipe avec peu de repos (≤3j) ou une charge élevée (≥10 matchs/30j) est plus susceptible de sous-performer."
+        />
       </h5>
       <div className="grid grid-cols-2 gap-3">
         {renderTeam(homeTeamName, fatigue.home, "green")}
@@ -1008,8 +1045,12 @@ function InjuriesCompact({
 
   return (
     <div>
-      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3">
+      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3 flex items-center">
         Blessures / Suspensions
+        <InfoButton
+          title="Blessures / Suspensions"
+          description="Liste des joueurs indisponibles pour cause de blessure ou suspension (cartons). L'absence d'un joueur clé (top buteur/passeur) a un impact plus fort sur la prédiction."
+        />
       </h5>
       <div className="grid grid-cols-2 gap-4">
         {renderList(homeTeamName, homeInjuries)}
@@ -1045,8 +1086,12 @@ function EloCompact({
 
   return (
     <div>
-      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3">
+      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3 flex items-center">
         Ratings ELO
+        <InfoButton
+          title="Rating ELO"
+          description="Le système ELO mesure la force historique d'une équipe sur la durée. Plus le score est élevé, plus l'équipe est forte. Un écart de 100 points donne environ 65% de chances de victoire à l'équipe la mieux classée. Échelle : 1100 (faible) à 2200 (élite)."
+        />
       </h5>
       <div className="rounded-lg bg-zinc-800/40 px-4 py-3 space-y-3">
         <div className="space-y-2">
@@ -1142,8 +1187,12 @@ function XGCompact({
 
   return (
     <div>
-      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3">
+      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3 flex items-center">
         Expected Goals (xG)
+        <InfoButton
+          title="Expected Goals (xG)"
+          description="Les xG (Expected Goals) mesurent la qualité des occasions de but créées. Un xG de 1.5/match signifie que les tirs tentés valaient en moyenne 1.5 but. Le xGA mesure les occasions concédées en défense. Un xG élevé + xGA bas = équipe dominante."
+        />
       </h5>
       <div className="grid grid-cols-2 gap-3">
         {renderTeam(homeTeamName, homeXG, "green")}
@@ -1190,8 +1239,12 @@ export function AnalysisBreakdown({ prediction }: AnalysisBreakdownProps) {
 
           {/* 2. Factors breakdown */}
           <div>
-            <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">
+            <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2 flex items-center">
               Facteurs de prédiction
+              <InfoButton
+                title="Facteurs de prédiction"
+                description="Le modèle combine 14 facteurs pondérés pour calculer les probabilités. Chaque facteur a un poids (%) reflétant son importance. Les valeurs comparent les deux équipes sur chaque dimension."
+              />
             </h5>
             <div className="rounded-lg bg-zinc-800/40 px-3 py-1">
               {statsScore.factors.map((f) => (
