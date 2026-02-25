@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { GoalsByPeriod, HeadToHeadRecord, MatchContext, MatchOdds, NewsArticle, Prediction, RefereeProfile, ScheduleFatigue, TacticalProfile, TeamPlayerAnalysis } from "@/lib/types";
+import { GoalsByPeriod, HeadToHeadRecord, MatchContext, MatchOdds, NewsArticle, Prediction, RefereeProfile, ScheduleFatigue, TacticalProfile, TeamElo, TeamPlayerAnalysis, TeamXG } from "@/lib/types";
 import Image from "next/image";
 
 interface AnalysisBreakdownProps {
@@ -998,10 +998,145 @@ function InjuriesCompact({
   );
 }
 
+function EloCompact({
+  homeElo,
+  awayElo,
+  homeTeamName,
+  awayTeamName,
+}: {
+  homeElo: TeamElo | null;
+  awayElo: TeamElo | null;
+  homeTeamName: string;
+  awayTeamName: string;
+}) {
+  const homeVal = homeElo ? Math.round(homeElo.elo) : null;
+  const awayVal = awayElo ? Math.round(awayElo.elo) : null;
+  const diff = homeVal && awayVal ? homeVal - awayVal : null;
+  const absDiff = diff !== null ? Math.abs(diff) : 0;
+  const label = absDiff < 50 ? "Très serré" : absDiff < 100 ? "Avantage modéré" : "Écart significatif";
+  const labelColor = absDiff < 50 ? "text-zinc-400" : absDiff < 100 ? "text-yellow-400" : "text-orange-400";
+
+  // Bar proportions (min 1200, max ~2100)
+  const min = 1200;
+  const max = 2100;
+  const homePct = homeVal ? ((homeVal - min) / (max - min)) * 100 : 0;
+  const awayPct = awayVal ? ((awayVal - min) / (max - min)) * 100 : 0;
+
+  return (
+    <div>
+      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3">
+        Ratings ELO
+      </h5>
+      <div className="rounded-lg bg-zinc-800/40 px-4 py-3 space-y-3">
+        <div className="space-y-2">
+          {[
+            { name: homeTeamName, val: homeVal, pct: homePct, color: "bg-green-500", textColor: "text-green-400" },
+            { name: awayTeamName, val: awayVal, pct: awayPct, color: "bg-blue-500", textColor: "text-blue-400" },
+          ].map(({ name, val, pct, color, textColor }) => (
+            <div key={name}>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] text-zinc-400">{name}</span>
+                <span className={`text-sm font-bold ${textColor}`}>{val ?? "N/A"}</span>
+              </div>
+              <div className="h-2 rounded-full bg-zinc-700 overflow-hidden">
+                <div className={`h-full rounded-full ${color} transition-all duration-700`} style={{ width: `${pct}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+        {diff !== null && (
+          <div className="flex items-center justify-center gap-2 pt-1">
+            <span className={`text-[11px] font-medium ${labelColor}`}>{label}</span>
+            <span className="text-[10px] text-zinc-500">
+              ({diff > 0 ? "+" : ""}{diff} pts)
+            </span>
+          </div>
+        )}
+        <div className="text-[10px] text-zinc-600 text-center">Source : ClubElo.com</div>
+      </div>
+    </div>
+  );
+}
+
+function XGCompact({
+  homeXG,
+  awayXG,
+  homeTeamName,
+  awayTeamName,
+}: {
+  homeXG: TeamXG | null;
+  awayXG: TeamXG | null;
+  homeTeamName: string;
+  awayTeamName: string;
+}) {
+  const renderTeam = (name: string, xg: TeamXG | null, color: "green" | "blue") => {
+    if (!xg) {
+      return (
+        <div className="rounded-lg bg-zinc-800/60 px-3 py-2.5">
+          <div className="text-xs font-medium text-zinc-400 mb-1">{name}</div>
+          <p className="text-[11px] text-zinc-600">Données xG indisponibles</p>
+        </div>
+      );
+    }
+
+    const attackColor = xg.xGPerMatch >= 1.8 ? "text-green-400" : xg.xGPerMatch >= 1.2 ? "text-zinc-300" : "text-red-400";
+    const defenseColor = xg.xGAPerMatch <= 1.0 ? "text-green-400" : xg.xGAPerMatch <= 1.4 ? "text-zinc-300" : "text-red-400";
+    const luckLabel = xg.xGDiff > 2 ? "Malchanceux" : xg.xGDiff > 0 ? "Sous-performe" : xg.xGDiff < -2 ? "Chanceux" : "Sur-performe";
+    const luckColor = xg.xGDiff > 0 ? "bg-red-900 text-red-300" : "bg-green-900 text-green-300";
+    const barColor = color === "green" ? "bg-green-500" : "bg-blue-500";
+
+    return (
+      <div className="rounded-lg bg-zinc-800/60 px-3 py-2.5 space-y-2">
+        <div className="text-xs font-medium text-zinc-400">{name}</div>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="text-center">
+            <div className={`text-lg font-bold ${attackColor}`}>{xg.xGPerMatch}</div>
+            <div className="text-[9px] text-zinc-500 uppercase">xG / match</div>
+          </div>
+          <div className="text-center">
+            <div className={`text-lg font-bold ${defenseColor}`}>{xg.xGAPerMatch}</div>
+            <div className="text-[9px] text-zinc-500 uppercase">xGA / match</div>
+          </div>
+        </div>
+        {/* xG bar */}
+        <div>
+          <div className="text-[9px] text-zinc-500 mb-0.5">Attaque</div>
+          <div className="h-1.5 rounded-full bg-zinc-700 overflow-hidden">
+            <div className={`h-full rounded-full ${barColor}`} style={{ width: `${Math.min(xg.xGPerMatch / 2.5, 1) * 100}%` }} />
+          </div>
+        </div>
+        <div>
+          <div className="text-[9px] text-zinc-500 mb-0.5">Solidité défensive</div>
+          <div className="h-1.5 rounded-full bg-zinc-700 overflow-hidden">
+            <div className={`h-full rounded-full ${barColor}`} style={{ width: `${Math.max(1 - xg.xGAPerMatch / 2.5, 0) * 100}%` }} />
+          </div>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className={`rounded px-1.5 py-0.5 text-[9px] font-medium ${luckColor}`}>{luckLabel}</span>
+          <span className="text-[10px] text-zinc-500">{xg.matches} matchs</span>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <h5 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3">
+        Expected Goals (xG)
+      </h5>
+      <div className="grid grid-cols-2 gap-3">
+        {renderTeam(homeTeamName, homeXG, "green")}
+        {renderTeam(awayTeamName, awayXG, "blue")}
+      </div>
+      <div className="text-[10px] text-zinc-600 text-center mt-2">Source : Understat</div>
+    </div>
+  );
+}
+
 export function AnalysisBreakdown({ prediction }: AnalysisBreakdownProps) {
   const [open, setOpen] = useState(false);
 
-  const { statsScore, homeTeam, awayTeam, playerAnalysis, injuries, news, tactics, headToHead, referee, odds, fatigue, matchContext } =
+  const { statsScore, homeTeam, awayTeam, playerAnalysis, injuries, news, tactics, headToHead, referee, odds, fatigue, matchContext, xG, elo } =
     prediction;
 
   return (
@@ -1049,6 +1184,30 @@ export function AnalysisBreakdown({ prediction }: AnalysisBreakdownProps) {
               ))}
             </div>
           </div>
+
+          {/* 2b. ELO Ratings */}
+          {elo && (elo.home || elo.away) ? (
+            <EloCompact
+              homeElo={elo.home}
+              awayElo={elo.away}
+              homeTeamName={homeTeam.shortName}
+              awayTeamName={awayTeam.shortName}
+            />
+          ) : (
+            <SectionUnavailable label="Ratings ELO" />
+          )}
+
+          {/* 2c. xG */}
+          {xG && (xG.home || xG.away) ? (
+            <XGCompact
+              homeXG={xG.home}
+              awayXG={xG.away}
+              homeTeamName={homeTeam.shortName}
+              awayTeamName={awayTeam.shortName}
+            />
+          ) : (
+            <SectionUnavailable label="Expected Goals (xG)" />
+          )}
 
           {/* 3. Squad quality */}
           {playerAnalysis.home.keyPlayers.length > 0 ||
@@ -1163,13 +1322,13 @@ export function AnalysisBreakdown({ prediction }: AnalysisBreakdownProps) {
           {/* 7. Methodology note */}
           <div className="rounded-lg bg-zinc-800/30 px-4 py-3 text-[11px] text-zinc-500 leading-relaxed">
             <span className="font-medium text-zinc-400">Méthodologie :</span>{" "}
-            Moteur statistique (8 facteurs pondérés) + analyse des joueurs clés
-            (top buteurs/passeurs de la ligue) croisée avec les blessures +
-            profils tactiques (formations, bilans dom/ext, distribution des buts) +
-            confrontations directes + contexte du match (enjeux, derby) +
-            profil arbitre + cotes du marché + fatigue calendrier +
-            raisonnement Claude IA. Les probabilités reflètent le score
-            composite avant ajustement IA.
+            Moteur statistique (12 facteurs pondérés : ELO, xG, points/match,
+            forme récente, bilans dom/ext, diff. buts, blessures, effectif,
+            fatigue, H2H, solidité défensive, cotes du marché) +
+            analyse des joueurs clés croisée avec les absences +
+            profils tactiques + confrontations directes + contexte du match +
+            raisonnement Claude IA en 5 étapes. Les probabilités reflètent le
+            score composite avant ajustement IA.
           </div>
         </div>
       )}

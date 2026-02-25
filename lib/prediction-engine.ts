@@ -1,4 +1,4 @@
-import { HeadToHeadRecord, Injury, ScheduleFatigue, Standing, StatsScore, TacticalProfile } from "./types";
+import { HeadToHeadRecord, Injury, MatchOdds, ScheduleFatigue, Standing, StatsScore, TacticalProfile, TeamElo, TeamXG } from "./types";
 
 function formScore(form: string | null): number {
   if (!form) return 0.5;
@@ -20,16 +20,20 @@ function formScore(form: string | null): number {
   return totalWeight > 0 ? weighted / totalWeight : 0.5;
 }
 
-/** Win rate from a record (wins / played), returns 0.5 if no data. */
-function winRate(record: { played: number; wins: number } | undefined): number {
-  if (!record || record.played === 0) return 0.5;
-  return record.wins / record.played;
-}
-
 /** Points-per-match from a record (wins*3 + draws) / played, normalized to [0,1]. */
 function recordPPM(record: { played: number; wins: number; draws: number } | undefined): number {
   if (!record || record.played === 0) return 0.5;
   return (record.wins * 3 + record.draws) / (record.played * 3);
+}
+
+/** Convert ELO to a 0-1 score. ELO typically ranges 1200-2100 for top clubs. */
+function eloToScore(elo: number): number {
+  return Math.max(0, Math.min(1, (elo - 1200) / 900));
+}
+
+/** Convert bookmaker odds to implied probability. */
+function oddsToProb(odds: number): number {
+  return odds > 0 ? 1 / odds : 0;
 }
 
 export function calculateStats(
@@ -44,62 +48,84 @@ export function calculateStats(
   homeTactics?: TacticalProfile | null,
   awayTactics?: TacticalProfile | null,
   fatigue?: ScheduleFatigue | null,
+  homeXG?: TeamXG | null,
+  awayXG?: TeamXG | null,
+  homeElo?: TeamElo | null,
+  awayElo?: TeamElo | null,
+  odds?: MatchOdds | null,
 ): StatsScore {
   const factors: StatsScore["factors"] = [];
 
-  // 1. Position (15%) - lower position = better
-  const homePosScore = (totalTeams - homeStanding.position + 1) / totalTeams;
-  const awayPosScore = (totalTeams - awayStanding.position + 1) / totalTeams;
+  // ====== CORE FACTORS (52%) ======
+
+  // 1. ELO Rating (14%) — best single predictor of team strength
+  const homeEloScore = homeElo ? eloToScore(homeElo.elo) : 0.5;
+  const awayEloScore = awayElo ? eloToScore(awayElo.elo) : 0.5;
   factors.push({
-    label: "Position au classement",
-    homeValue: `${homeStanding.position}e`,
-    awayValue: `${awayStanding.position}e`,
-    weight: 0.15,
+    label: "Rating ELO",
+    homeValue: homeElo ? `${Math.round(homeElo.elo)}` : "N/A",
+    awayValue: awayElo ? `${Math.round(awayElo.elo)}` : "N/A",
+    weight: 0.14,
   });
 
-  // 2. Points per match (14%)
+  // 2. xG Performance (12%) — separates luck from quality
+  let homeXGScore = 0.5;
+  let awayXGScore = 0.5;
+  let homeXGLabel = "N/A";
+  let awayXGLabel = "N/A";
+
+  if (homeXG) {
+    // Combine offensive xG and defensive xGA into a score
+    // Higher xG/match = better attack, lower xGA/match = better defense
+    const attackScore = Math.min(homeXG.xGPerMatch / 2.5, 1);
+    const defenseScore = Math.max(0, 1 - homeXG.xGAPerMatch / 2.5);
+    homeXGScore = attackScore * 0.5 + defenseScore * 0.5;
+    homeXGLabel = `${homeXG.xGPerMatch} xG, ${homeXG.xGAPerMatch} xGA`;
+  }
+
+  if (awayXG) {
+    const attackScore = Math.min(awayXG.xGPerMatch / 2.5, 1);
+    const defenseScore = Math.max(0, 1 - awayXG.xGAPerMatch / 2.5);
+    awayXGScore = attackScore * 0.5 + defenseScore * 0.5;
+    awayXGLabel = `${awayXG.xGPerMatch} xG, ${awayXG.xGAPerMatch} xGA`;
+  }
+
+  factors.push({
+    label: "xG (Expected Goals)",
+    homeValue: homeXGLabel,
+    awayValue: awayXGLabel,
+    weight: 0.12,
+  });
+
+  // 3. Points per match (12%)
   const homePPM = homeStanding.playedGames > 0
     ? homeStanding.points / homeStanding.playedGames
     : 0;
   const awayPPM = awayStanding.playedGames > 0
     ? awayStanding.points / awayStanding.playedGames
     : 0;
-  const maxPPM = 3;
-  const homePPMScore = homePPM / maxPPM;
-  const awayPPMScore = awayPPM / maxPPM;
+  const homePPMScore = homePPM / 3;
+  const awayPPMScore = awayPPM / 3;
   factors.push({
     label: "Points par match",
     homeValue: homePPM.toFixed(2),
     awayValue: awayPPM.toFixed(2),
-    weight: 0.14,
+    weight: 0.12,
   });
 
-  // 3. Form - last 5 matches (16%)
+  // 4. Form - last 5 matches (14%)
   const homeFormScore = formScore(homeStanding.form);
   const awayFormScore = formScore(awayStanding.form);
   factors.push({
     label: "Forme récente (5 matchs)",
     homeValue: homeStanding.form ?? "N/A",
     awayValue: awayStanding.form ?? "N/A",
-    weight: 0.16,
+    weight: 0.14,
   });
 
-  // 4. Goal difference (10%)
-  const maxGD = Math.max(
-    Math.abs(homeStanding.goalDifference),
-    Math.abs(awayStanding.goalDifference),
-    1
-  );
-  const homeGDScore = (homeStanding.goalDifference / maxGD + 1) / 2;
-  const awayGDScore = (awayStanding.goalDifference / maxGD + 1) / 2;
-  factors.push({
-    label: "Différence de buts",
-    homeValue: `${homeStanding.goalDifference > 0 ? "+" : ""}${homeStanding.goalDifference}`,
-    awayValue: `${awayStanding.goalDifference > 0 ? "+" : ""}${awayStanding.goalDifference}`,
-    weight: 0.10,
-  });
+  // ====== CONTEXTUAL FACTORS (36%) ======
 
-  // 5. Home/Away performance (14%) — real records from tactics API, fallback to generic bonus
+  // 5. Home/Away performance (12%) — real records from tactics API
   let homeVenueScore: number;
   let awayVenueScore: number;
   let homeVenueLabel: string;
@@ -127,10 +153,25 @@ export function calculateStats(
     label: "Bilan dom/ext",
     homeValue: homeVenueLabel,
     awayValue: awayVenueLabel,
-    weight: 0.14,
+    weight: 0.12,
   });
 
-  // 6. Injuries (8%) - fewer injuries = better
+  // 6. Goal difference (6%)
+  const maxGD = Math.max(
+    Math.abs(homeStanding.goalDifference),
+    Math.abs(awayStanding.goalDifference),
+    1
+  );
+  const homeGDScore = (homeStanding.goalDifference / maxGD + 1) / 2;
+  const awayGDScore = (awayStanding.goalDifference / maxGD + 1) / 2;
+  factors.push({
+    label: "Différence de buts",
+    homeValue: `${homeStanding.goalDifference > 0 ? "+" : ""}${homeStanding.goalDifference}`,
+    awayValue: `${awayStanding.goalDifference > 0 ? "+" : ""}${awayStanding.goalDifference}`,
+    weight: 0.06,
+  });
+
+  // 7. Injuries (6%)
   const homeInjCount = homeInjuries?.length ?? 0;
   const awayInjCount = awayInjuries?.length ?? 0;
   const maxInj = Math.max(homeInjCount, awayInjCount, 1);
@@ -140,20 +181,20 @@ export function calculateStats(
     label: "Joueurs absents",
     homeValue: `${homeInjCount} absent${homeInjCount !== 1 ? "s" : ""}`,
     awayValue: `${awayInjCount} absent${awayInjCount !== 1 ? "s" : ""}`,
-    weight: 0.08,
+    weight: 0.06,
   });
 
-  // 7. Squad quality (7%) - based on key players analysis
+  // 8. Squad quality (5%)
   const homeSquadScore = homeSquadQuality ?? 0.5;
   const awaySquadScore = awaySquadQuality ?? 0.5;
   factors.push({
     label: "Qualité effectif",
     homeValue: `${Math.round(homeSquadScore * 100)}%`,
     awayValue: `${Math.round(awaySquadScore * 100)}%`,
-    weight: 0.07,
+    weight: 0.05,
   });
 
-  // 8. Schedule fatigue (8%) — more rest + fewer recent matches = better
+  // 9. Schedule fatigue (5%)
   let homeFatigueScore = 0.5;
   let awayFatigueScore = 0.5;
   let homeFatigueLabel = "N/A";
@@ -161,13 +202,11 @@ export function calculateStats(
 
   if (fatigue) {
     const fatigueScore = (t: typeof fatigue.home) => {
-      // Rest days: 0-1 = tired (0.2), 2 = short (0.4), 3-4 = normal (0.6), 5+ = well rested (0.8)
       let restScore = 0.5;
       if (t.daysSinceLastMatch !== null) {
         const d = t.daysSinceLastMatch;
         restScore = d <= 1 ? 0.2 : d === 2 ? 0.4 : d <= 4 ? 0.6 : 0.8;
       }
-      // Match load: fewer matches in 30 days = less fatigue
       const loadScore = Math.max(0, 1 - t.matchesLast30Days / 12);
       return restScore * 0.6 + loadScore * 0.4;
     };
@@ -189,10 +228,10 @@ export function calculateStats(
     label: "Fatigue calendrier",
     homeValue: homeFatigueLabel,
     awayValue: awayFatigueLabel,
-    weight: 0.08,
+    weight: 0.05,
   });
 
-  // 9. Head-to-head record (4%)
+  // 10. Head-to-head (3%)
   const h2hTotal = headToHead ? headToHead.team1Wins + headToHead.draws + headToHead.team2Wins : 0;
   const homeH2HScore = h2hTotal > 0 ? headToHead!.team1Wins / h2hTotal : 0.5;
   const awayH2HScore = h2hTotal > 0 ? headToHead!.team2Wins / h2hTotal : 0.5;
@@ -200,12 +239,10 @@ export function calculateStats(
     label: "Confrontations directes",
     homeValue: h2hTotal > 0 ? `${headToHead!.team1Wins}V ${headToHead!.draws}N ${headToHead!.team2Wins}D` : "N/A",
     awayValue: h2hTotal > 0 ? `${headToHead!.team2Wins}V ${headToHead!.draws}N ${headToHead!.team1Wins}D` : "N/A",
-    weight: 0.04,
+    weight: 0.03,
   });
 
-  // Weighted composite (total = 15+14+16+10+14+8+7+8+4 = 96% ... remaining 4% is defensive quality)
-
-  // 10. Defensive solidity (4%) — clean sheets + goals against avg
+  // 11. Defensive solidity (3%)
   let homeDefScore = 0.5;
   let awayDefScore = 0.5;
   let homeDefLabel = "N/A";
@@ -233,48 +270,89 @@ export function calculateStats(
     label: "Solidité défensive",
     homeValue: homeDefLabel,
     awayValue: awayDefLabel,
-    weight: 0.04,
+    weight: 0.03,
   });
 
-  // Weighted composite (total = 15+14+16+10+14+8+7+8+4+4 = 100%)
+  // ====== MARKET ANCHOR (12%) ======
+
+  // 12. Bookmaker odds (12%) — the market is the strongest single predictor
+  let homeOddsScore = 0.5;
+  let awayOddsScore = 0.5;
+  let homeOddsLabel = "N/A";
+  let awayOddsLabel = "N/A";
+
+  if (odds) {
+    const homeProb = oddsToProb(odds.homeWin);
+    const drawProb = oddsToProb(odds.draw);
+    const awayProb = oddsToProb(odds.awayWin);
+    const totalProb = homeProb + drawProb + awayProb;
+    // Normalize (remove bookmaker margin)
+    const normHome = homeProb / totalProb;
+    const normAway = awayProb / totalProb;
+    homeOddsScore = normHome;
+    awayOddsScore = normAway;
+    homeOddsLabel = `${odds.homeWin} (${Math.round(normHome * 100)}%)`;
+    awayOddsLabel = `${odds.awayWin} (${Math.round(normAway * 100)}%)`;
+  }
+
+  factors.push({
+    label: "Cotes du marché",
+    homeValue: homeOddsLabel,
+    awayValue: awayOddsLabel,
+    weight: 0.12,
+  });
+
+  // ====== WEIGHTED COMPOSITE ======
+  // Total = 14+12+12+14+12+6+6+5+5+3+3+12 = 104%... let me recheck
+  // ELO 14 + xG 12 + PPM 12 + Form 14 + Venue 12 + GD 6 + Inj 6 + Squad 5 + Fatigue 5 + H2H 3 + Def 3 + Odds 12 = 104
+  // Need to fix: reduce to 100. Let me adjust.
+  // ELO 12 + xG 10 + PPM 10 + Form 12 + Venue 10 + GD 6 + Inj 6 + Squad 5 + Fatigue 5 + H2H 3 + Def 3 + Odds 18 = 100
+
+  // Actually let me use the weights as declared in factors above and just normalize
   const homeTotal =
-    homePosScore * 0.15 +
-    homePPMScore * 0.14 +
-    homeFormScore * 0.16 +
-    homeGDScore * 0.10 +
-    homeVenueScore * 0.14 +
-    homeInjScore * 0.08 +
-    homeSquadScore * 0.07 +
-    homeFatigueScore * 0.08 +
-    homeH2HScore * 0.04 +
-    homeDefScore * 0.04;
+    homeEloScore * 0.14 +
+    homeXGScore * 0.12 +
+    homePPMScore * 0.12 +
+    homeFormScore * 0.14 +
+    homeVenueScore * 0.12 +
+    homeGDScore * 0.06 +
+    homeInjScore * 0.06 +
+    homeSquadScore * 0.05 +
+    homeFatigueScore * 0.05 +
+    homeH2HScore * 0.03 +
+    homeDefScore * 0.03 +
+    homeOddsScore * 0.12;
 
   const awayTotal =
-    awayPosScore * 0.15 +
-    awayPPMScore * 0.14 +
-    awayFormScore * 0.16 +
-    awayGDScore * 0.10 +
-    awayVenueScore * 0.14 +
-    awayInjScore * 0.08 +
-    awaySquadScore * 0.07 +
-    awayFatigueScore * 0.08 +
-    awayH2HScore * 0.04 +
-    awayDefScore * 0.04;
+    awayEloScore * 0.14 +
+    awayXGScore * 0.12 +
+    awayPPMScore * 0.12 +
+    awayFormScore * 0.14 +
+    awayVenueScore * 0.12 +
+    awayGDScore * 0.06 +
+    awayInjScore * 0.06 +
+    awaySquadScore * 0.05 +
+    awayFatigueScore * 0.05 +
+    awayH2HScore * 0.03 +
+    awayDefScore * 0.03 +
+    awayOddsScore * 0.12;
 
-  // Convert to 1/N/2 probabilities using realistic football distributions
-  const diff = homeTotal - awayTotal;
+  // Normalize weights (sum = 1.04, so divide by 1.04)
+  const weightSum = 0.14 + 0.12 + 0.12 + 0.14 + 0.12 + 0.06 + 0.06 + 0.05 + 0.05 + 0.03 + 0.03 + 0.12;
+  const homeNorm = homeTotal / weightSum;
+  const awayNorm = awayTotal / weightSum;
+  const diff = homeNorm - awayNorm;
 
-  // Draw probability: Gaussian decay from 27% baseline (football average ~25-28%)
-  // Wider diff = less likely draw, but always >= 8%
+  // Draw probability: Gaussian decay from 27% baseline
   let drawScore = Math.max(0.08, 0.27 * Math.exp(-4 * diff * diff));
 
-  // Remaining probability split using tanh for smooth, bounded favorite bias
+  // Remaining probability split using tanh
   const remaining = 1 - drawScore;
   const favorBias = Math.tanh(diff * 2.5);
   let homeScore = remaining * (0.5 + favorBias * 0.40);
   let awayScore = remaining * (0.5 - favorBias * 0.40);
 
-  // Safety clamp (should rarely trigger with this formula)
+  // Safety clamp
   homeScore = Math.max(0.05, Math.min(0.85, homeScore));
   awayScore = Math.max(0.05, Math.min(0.85, awayScore));
   drawScore = Math.max(0.08, Math.min(0.35, drawScore));

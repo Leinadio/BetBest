@@ -166,6 +166,21 @@ export interface MatchContext {
   isDerby: boolean;
 }
 
+export interface TeamXG {
+  team: string;
+  matches: number;
+  xG: number;
+  xGA: number;
+  xGPerMatch: number;
+  xGAPerMatch: number;
+  xGDiff: number; // xG - actual goals (positive = unlucky, negative = lucky)
+}
+
+export interface TeamElo {
+  team: string;
+  elo: number;
+}
+
 export interface PredictionAnalysis {
   powerBalance: string;
   momentum: string;
@@ -192,6 +207,8 @@ export interface Prediction {
   odds?: MatchOdds;
   fatigue?: ScheduleFatigue;
   matchContext?: MatchContext;
+  xG?: { home: TeamXG | null; away: TeamXG | null };
+  elo?: { home: TeamElo | null; away: TeamElo | null };
 }
 
 export const LEAGUES: League[] = [

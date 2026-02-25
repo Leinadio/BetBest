@@ -1,4 +1,5 @@
 import { analyzePrediction } from "@/lib/claude-analyzer";
+import { getAllEloRatings, findTeamElo } from "@/lib/elo-api";
 import { getHeadToHead, getMatchScheduleData, getRecentForm, getStandings } from "@/lib/football-api";
 import { findTeamInjuries, getInjuries } from "@/lib/injuries-api";
 import { getTeamNews } from "@/lib/news-api";
@@ -7,6 +8,7 @@ import { calculateStats } from "@/lib/prediction-engine";
 import { getMatchContext, getMatchOdds, getRefereeStats } from "@/lib/match-context-api";
 import { getLeagueTeamIds, getTeamTactics, resolveApiFootballTeamId } from "@/lib/tactics-api";
 import { LEAGUES } from "@/lib/types";
+import { getLeagueXG, findTeamXG } from "@/lib/understat-api";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(request: NextRequest) {
@@ -36,7 +38,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const [standings, allInjuries, allKeyPlayers, formMap, allPlayerForms, teamIdMap, headToHead] = await Promise.all([
+    const [standings, allInjuries, allKeyPlayers, formMap, allPlayerForms, teamIdMap, headToHead, leagueXG, allElo] = await Promise.all([
       getStandings(league),
       getInjuries(league),
       getKeyPlayers(league),
@@ -44,6 +46,8 @@ export async function POST(request: NextRequest) {
       getRecentPlayerForm(league),
       getLeagueTeamIds(league),
       getHeadToHead(league, homeTeamId, awayTeamId),
+      getLeagueXG(league),
+      getAllEloRatings(),
     ]);
 
     // Enrichir les standings avec la forme calculée
@@ -78,6 +82,11 @@ export async function POST(request: NextRequest) {
     const homeApiId = resolveApiFootballTeamId(teamIdMap, homeStanding.team.name);
     const awayApiId = resolveApiFootballTeamId(teamIdMap, awayStanding.team.name);
 
+    const homeXG = findTeamXG(leagueXG, homeStanding.team.name);
+    const awayXG = findTeamXG(leagueXG, awayStanding.team.name);
+    const homeElo = findTeamElo(allElo, homeStanding.team.name);
+    const awayElo = findTeamElo(allElo, awayStanding.team.name);
+
     const matchContext = getMatchContext(homeStanding, awayStanding, standings.length);
 
     const [homeNews, awayNews, homeTactics, awayTactics, scheduleData, odds] = await Promise.all([
@@ -109,6 +118,11 @@ export async function POST(request: NextRequest) {
       homeTactics,
       awayTactics,
       fatigue,
+      homeXG,
+      awayXG,
+      homeElo,
+      awayElo,
+      odds,
     );
 
     const prediction = await analyzePrediction({
@@ -133,6 +147,10 @@ export async function POST(request: NextRequest) {
       odds,
       fatigue,
       matchContext,
+      homeXG,
+      awayXG,
+      homeElo,
+      awayElo,
     });
 
     return NextResponse.json(prediction);

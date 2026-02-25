@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { HeadToHeadRecord, Injury, MatchContext, MatchOdds, NewsArticle, PlayerForm, Prediction, PredictionAnalysis, RefereeProfile, ScheduleFatigue, Standing, StatsScore, TacticalProfile, Team, TeamPlayerAnalysis } from "./types";
+import { HeadToHeadRecord, Injury, MatchContext, MatchOdds, NewsArticle, PlayerForm, Prediction, PredictionAnalysis, RefereeProfile, ScheduleFatigue, Standing, StatsScore, TacticalProfile, Team, TeamElo, TeamPlayerAnalysis, TeamXG } from "./types";
 
 const anthropic = new Anthropic();
 
@@ -25,6 +25,10 @@ interface AnalyzeParams {
   odds?: MatchOdds | null;
   fatigue?: ScheduleFatigue | null;
   matchContext?: MatchContext | null;
+  homeXG?: TeamXG | null;
+  awayXG?: TeamXG | null;
+  homeElo?: TeamElo | null;
+  awayElo?: TeamElo | null;
 }
 
 export async function analyzePrediction({
@@ -49,6 +53,10 @@ export async function analyzePrediction({
   odds,
   fatigue,
   matchContext,
+  homeXG,
+  awayXG,
+  homeElo,
+  awayElo,
 }: AnalyzeParams): Promise<Prediction> {
   const formatInjuries = (injuries: Injury[] | undefined): string => {
     if (!injuries || injuries.length === 0) return "Aucune absence signalée";
@@ -232,6 +240,15 @@ Compétition : ${leagueCode}
 DONNÉES DISPONIBLES
 ══════════════════════════════════
 
+[RATINGS ELO (ClubElo.com)]
+${homeTeam.name} : ${homeElo ? Math.round(homeElo.elo) : "N/A"}
+${awayTeam.name} : ${awayElo ? Math.round(awayElo.elo) : "N/A"}
+${homeElo && awayElo ? `Écart : ${Math.round(homeElo.elo - awayElo.elo)} points ELO (${Math.abs(Math.round(homeElo.elo - awayElo.elo)) < 50 ? "très serré" : Math.abs(Math.round(homeElo.elo - awayElo.elo)) < 100 ? "avantage modéré" : "écart significatif"})` : ""}
+
+[xG — EXPECTED GOALS (Understat)]
+${homeXG ? `${homeTeam.name} : ${homeXG.xGPerMatch} xG/match, ${homeXG.xGAPerMatch} xGA/match (${homeXG.matches}m) — diff réel vs xG: ${homeXG.xGDiff > 0 ? "+" : ""}${homeXG.xGDiff} (${homeXG.xGDiff > 2 ? "très malchanceux" : homeXG.xGDiff > 0 ? "sous-performe" : homeXG.xGDiff < -2 ? "très chanceux" : "sur-performe"})` : `${homeTeam.name} : Données xG indisponibles`}
+${awayXG ? `${awayTeam.name} : ${awayXG.xGPerMatch} xG/match, ${awayXG.xGAPerMatch} xGA/match (${awayXG.matches}m) — diff réel vs xG: ${awayXG.xGDiff > 0 ? "+" : ""}${awayXG.xGDiff} (${awayXG.xGDiff > 2 ? "très malchanceux" : awayXG.xGDiff > 0 ? "sous-performe" : awayXG.xGDiff < -2 ? "très chanceux" : "sur-performe"})` : `${awayTeam.name} : Données xG indisponibles`}
+
 [CLASSEMENT]
 ${homeTeam.name} : ${homeStanding.position}e — ${homeStanding.points} pts (${homeStanding.playedGames}J) — ${homeStanding.won}V ${homeStanding.draw}N ${homeStanding.lost}D — Buts: ${homeStanding.goalsFor}/${homeStanding.goalsAgainst} (diff: ${homeStanding.goalDifference > 0 ? "+" : ""}${homeStanding.goalDifference}) — Forme: ${homeStanding.form ?? "N/A"}
 ${awayTeam.name} : ${awayStanding.position}e — ${awayStanding.points} pts (${awayStanding.playedGames}J) — ${awayStanding.won}V ${awayStanding.draw}N ${awayStanding.lost}D — Buts: ${awayStanding.goalsFor}/${awayStanding.goalsAgainst} (diff: ${awayStanding.goalDifference > 0 ? "+" : ""}${awayStanding.goalDifference}) — Forme: ${awayStanding.form ?? "N/A"}
@@ -403,5 +420,7 @@ Réponds UNIQUEMENT avec un JSON valide (sans markdown, sans backticks) :
     odds: odds ?? undefined,
     fatigue: fatigue ?? undefined,
     matchContext: matchContext ?? undefined,
+    xG: { home: homeXG ?? null, away: awayXG ?? null },
+    elo: { home: homeElo ?? null, away: awayElo ?? null },
   };
 }
