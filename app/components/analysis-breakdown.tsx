@@ -1322,9 +1322,10 @@ export function AnalysisBreakdown({ prediction }: AnalysisBreakdownProps) {
           {/* 7. Methodology note */}
           <div className="rounded-lg bg-zinc-800/30 px-4 py-3 text-[11px] text-zinc-500 leading-relaxed">
             <span className="font-medium text-zinc-400">Méthodologie :</span>{" "}
-            Moteur statistique (12 facteurs pondérés : ELO, xG, points/match,
-            forme récente, bilans dom/ext, diff. buts, blessures, effectif,
-            fatigue, H2H, solidité défensive, cotes du marché) +
+            Moteur statistique (14 facteurs pondérés : cotes du marché, xG récent,
+            ELO, forme récente, bilans dom/ext, tendance xG, blessures pondérées,
+            effectif, fatigue, H2H, solidité défensive, difficulté calendrier,
+            enjeux du match, profil arbitre) +
             analyse des joueurs clés croisée avec les absences +
             profils tactiques + confrontations directes + contexte du match +
             raisonnement Claude IA en 5 étapes. Les probabilités reflètent le

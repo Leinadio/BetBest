@@ -71,19 +71,41 @@ export async function getLeagueXG(
       const history = team.history;
       if (history.length === 0) continue;
 
+      // Season totals
       const totalXG = history.reduce((s, h) => s + h.xG, 0);
       const totalXGA = history.reduce((s, h) => s + h.xGA, 0);
       const totalScored = history.reduce((s, h) => s + h.scored, 0);
       const matches = history.length;
+
+      const seasonXGPM = totalXG / matches;
+      const seasonXGAPM = totalXGA / matches;
+
+      // Recent 5 matches momentum
+      const RECENT_N = 5;
+      const recentMatches = history.slice(-RECENT_N);
+      const recentXG = recentMatches.reduce((s, h) => s + h.xG, 0);
+      const recentXGA = recentMatches.reduce((s, h) => s + h.xGA, 0);
+      const recentCount = recentMatches.length;
+
+      const recentXGPM = recentCount > 0 ? recentXG / recentCount : seasonXGPM;
+      const recentXGAPM = recentCount > 0 ? recentXGA / recentCount : seasonXGAPM;
+
+      // Trend: combine attack improvement (xG up) and defense improvement (xGA down)
+      const attackDelta = recentXGPM - seasonXGPM;
+      const defenseDelta = seasonXGAPM - recentXGAPM;
+      const xGTrend = Math.max(-1, Math.min(1, (attackDelta + defenseDelta) / 2));
 
       result[team.title.toLowerCase()] = {
         team: team.title,
         matches,
         xG: Math.round(totalXG * 100) / 100,
         xGA: Math.round(totalXGA * 100) / 100,
-        xGPerMatch: Math.round((totalXG / matches) * 100) / 100,
-        xGAPerMatch: Math.round((totalXGA / matches) * 100) / 100,
+        xGPerMatch: Math.round(seasonXGPM * 100) / 100,
+        xGAPerMatch: Math.round(seasonXGAPM * 100) / 100,
         xGDiff: Math.round((totalXG - totalScored) * 100) / 100,
+        recentXGPerMatch: Math.round(recentXGPM * 100) / 100,
+        recentXGAPerMatch: Math.round(recentXGAPM * 100) / 100,
+        xGTrend: Math.round(xGTrend * 100) / 100,
       };
     }
 

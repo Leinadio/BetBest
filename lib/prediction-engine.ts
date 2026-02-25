@@ -1,4 +1,10 @@
-import { HeadToHeadRecord, Injury, MatchOdds, ScheduleFatigue, Standing, StatsScore, TacticalProfile, TeamElo, TeamXG } from "./types";
+import { CalculateStatsInput, CriticalAbsence, Injury, Stakes, StatsScore } from "./types";
+
+/** Retourne fallback si value est null, undefined ou NaN. */
+function safeNum(value: number | null | undefined, fallback: number): number {
+  if (value == null || Number.isNaN(value)) return fallback;
+  return value;
+}
 
 function formScore(form: string | null): number {
   if (!form) return 0.5;
@@ -12,7 +18,7 @@ function formScore(form: string | null): number {
 
   for (let i = 0; i < results.length; i++) {
     const w = weights[i] ?? 0.10;
-    const pts = results[i] === "W" ? 1 : results[i] === "D" ? 0.33 : 0;
+    const pts = results[i] === "W" ? 1 : results[i] === "D" ? 0.4 : 0;
     weighted += pts * w;
     totalWeight += w;
   }
@@ -36,96 +42,74 @@ function oddsToProb(odds: number): number {
   return odds > 0 ? 1 / odds : 0;
 }
 
-export function calculateStats(
-  homeStanding: Standing,
-  awayStanding: Standing,
-  totalTeams: number,
-  homeInjuries?: Injury[],
-  awayInjuries?: Injury[],
-  homeSquadQuality?: number,
-  awaySquadQuality?: number,
-  headToHead?: HeadToHeadRecord,
-  homeTactics?: TacticalProfile | null,
-  awayTactics?: TacticalProfile | null,
-  fatigue?: ScheduleFatigue | null,
-  homeXG?: TeamXG | null,
-  awayXG?: TeamXG | null,
-  homeElo?: TeamElo | null,
-  awayElo?: TeamElo | null,
-  odds?: MatchOdds | null,
-): StatsScore {
+export function calculateStats(input: CalculateStatsInput): StatsScore {
+  const {
+    homeStanding, awayStanding, homeInjuries, awayInjuries,
+    homeSquadQuality, awaySquadQuality, headToHead,
+    homeTactics, awayTactics, fatigue, homeXG, awayXG,
+    homeElo, awayElo, odds, homeSOS, awaySOS,
+    homeCriticalAbsences, awayCriticalAbsences,
+    matchContext, referee,
+  } = input;
+
   const factors: StatsScore["factors"] = [];
 
-  // ====== CORE FACTORS (52%) ======
+  // ====== CORE FACTORS ======
 
-  // 1. ELO Rating (14%) — best single predictor of team strength
-  const homeEloScore = homeElo ? eloToScore(homeElo.elo) : 0.5;
-  const awayEloScore = awayElo ? eloToScore(awayElo.elo) : 0.5;
+  // 1. ELO Rating (7%)
+  const homeEloScore = homeElo ? eloToScore(safeNum(homeElo.elo, 1650)) : 0.5;
+  const awayEloScore = awayElo ? eloToScore(safeNum(awayElo.elo, 1650)) : 0.5;
   factors.push({
     label: "Rating ELO",
     homeValue: homeElo ? `${Math.round(homeElo.elo)}` : "N/A",
     awayValue: awayElo ? `${Math.round(awayElo.elo)}` : "N/A",
-    weight: 0.14,
+    weight: 0.07,
   });
 
-  // 2. xG Performance (12%) — separates luck from quality
+  // 2. xG Performance (12%) — recent 5-match, threshold 3.0, 40% attack / 60% defense
   let homeXGScore = 0.5;
   let awayXGScore = 0.5;
   let homeXGLabel = "N/A";
   let awayXGLabel = "N/A";
 
   if (homeXG) {
-    // Combine offensive xG and defensive xGA into a score
-    // Higher xG/match = better attack, lower xGA/match = better defense
-    const attackScore = Math.min(homeXG.xGPerMatch / 2.5, 1);
-    const defenseScore = Math.max(0, 1 - homeXG.xGAPerMatch / 2.5);
-    homeXGScore = attackScore * 0.5 + defenseScore * 0.5;
-    homeXGLabel = `${homeXG.xGPerMatch} xG, ${homeXG.xGAPerMatch} xGA`;
+    const xgpm = safeNum(homeXG.recentXGPerMatch, safeNum(homeXG.xGPerMatch, 1.2));
+    const xgapm = safeNum(homeXG.recentXGAPerMatch, safeNum(homeXG.xGAPerMatch, 1.2));
+    const attackScore = Math.min(xgpm / 3.0, 1);
+    const defenseScore = Math.max(0, 1 - xgapm / 3.0);
+    homeXGScore = attackScore * 0.4 + defenseScore * 0.6;
+    homeXGLabel = `${xgpm.toFixed(2)} xG, ${xgapm.toFixed(2)} xGA (5m)`;
   }
 
   if (awayXG) {
-    const attackScore = Math.min(awayXG.xGPerMatch / 2.5, 1);
-    const defenseScore = Math.max(0, 1 - awayXG.xGAPerMatch / 2.5);
-    awayXGScore = attackScore * 0.5 + defenseScore * 0.5;
-    awayXGLabel = `${awayXG.xGPerMatch} xG, ${awayXG.xGAPerMatch} xGA`;
+    const xgpm = safeNum(awayXG.recentXGPerMatch, safeNum(awayXG.xGPerMatch, 1.2));
+    const xgapm = safeNum(awayXG.recentXGAPerMatch, safeNum(awayXG.xGAPerMatch, 1.2));
+    const attackScore = Math.min(xgpm / 3.0, 1);
+    const defenseScore = Math.max(0, 1 - xgapm / 3.0);
+    awayXGScore = attackScore * 0.4 + defenseScore * 0.6;
+    awayXGLabel = `${xgpm.toFixed(2)} xG, ${xgapm.toFixed(2)} xGA (5m)`;
   }
 
   factors.push({
-    label: "xG (Expected Goals)",
+    label: "xG récent (5 matchs)",
     homeValue: homeXGLabel,
     awayValue: awayXGLabel,
     weight: 0.12,
   });
 
-  // 3. Points per match (12%)
-  const homePPM = homeStanding.playedGames > 0
-    ? homeStanding.points / homeStanding.playedGames
-    : 0;
-  const awayPPM = awayStanding.playedGames > 0
-    ? awayStanding.points / awayStanding.playedGames
-    : 0;
-  const homePPMScore = homePPM / 3;
-  const awayPPMScore = awayPPM / 3;
-  factors.push({
-    label: "Points par match",
-    homeValue: homePPM.toFixed(2),
-    awayValue: awayPPM.toFixed(2),
-    weight: 0.12,
-  });
-
-  // 4. Form - last 5 matches (14%)
+  // 3. Form - last 5 matches (8%)
   const homeFormScore = formScore(homeStanding.form);
   const awayFormScore = formScore(awayStanding.form);
   factors.push({
     label: "Forme récente (5 matchs)",
     homeValue: homeStanding.form ?? "N/A",
     awayValue: awayStanding.form ?? "N/A",
-    weight: 0.14,
+    weight: 0.08,
   });
 
-  // ====== CONTEXTUAL FACTORS (36%) ======
+  // ====== CONTEXTUAL FACTORS ======
 
-  // 5. Home/Away performance (12%) — real records from tactics API
+  // 4. Home/Away performance (10%)
   let homeVenueScore: number;
   let awayVenueScore: number;
   let homeVenueLabel: string;
@@ -153,66 +137,105 @@ export function calculateStats(
     label: "Bilan dom/ext",
     homeValue: homeVenueLabel,
     awayValue: awayVenueLabel,
-    weight: 0.12,
+    weight: 0.10,
   });
 
-  // 6. Goal difference (6%)
-  const maxGD = Math.max(
-    Math.abs(homeStanding.goalDifference),
-    Math.abs(awayStanding.goalDifference),
-    1
-  );
-  const homeGDScore = (homeStanding.goalDifference / maxGD + 1) / 2;
-  const awayGDScore = (awayStanding.goalDifference / maxGD + 1) / 2;
+  // 5. xG Trend (5%) — momentum indicator
+  const homeXGTrendScore = homeXG?.xGTrend != null ? (safeNum(homeXG.xGTrend, 0) + 1) / 2 : 0.5;
+  const awayXGTrendScore = awayXG?.xGTrend != null ? (safeNum(awayXG.xGTrend, 0) + 1) / 2 : 0.5;
+  const fmtTrend = (t: number | undefined | null) => {
+    if (t == null) return "N/A";
+    const arrow = t > 0.05 ? "↑" : t < -0.05 ? "↓" : "→";
+    return `${arrow} ${t > 0 ? "+" : ""}${t.toFixed(2)}`;
+  };
   factors.push({
-    label: "Différence de buts",
-    homeValue: `${homeStanding.goalDifference > 0 ? "+" : ""}${homeStanding.goalDifference}`,
-    awayValue: `${awayStanding.goalDifference > 0 ? "+" : ""}${awayStanding.goalDifference}`,
-    weight: 0.06,
+    label: "Tendance xG",
+    homeValue: fmtTrend(homeXG?.xGTrend),
+    awayValue: fmtTrend(awayXG?.xGTrend),
+    weight: 0.05,
   });
 
-  // 7. Injuries (6%)
+  // 6. Injuries (8%) — role-weighted using critical absences
+  const computeInjuryPenalty = (
+    injuries: Injury[] | undefined,
+    criticals: CriticalAbsence[] | undefined
+  ): number => {
+    let penalty = 0;
+
+    // Fuzzy matching cohérent avec identifyCriticalAbsences (players-api.ts)
+    const criticalPlayerNames = (criticals ?? []).map((c) => c.player.name.toLowerCase());
+    const isCriticalPlayer = (injName: string): boolean => {
+      const injNorm = injName.toLowerCase();
+      const injLast = injNorm.split(" ").pop() ?? "";
+      return criticalPlayerNames.some((critNorm) => {
+        const critLast = critNorm.split(" ").pop() ?? "";
+        return injNorm.includes(critNorm) || critNorm.includes(injNorm) ||
+          (injLast.length > 1 && injLast === critLast);
+      });
+    };
+
+    for (const ca of criticals ?? []) {
+      const contributions = ca.player.goals + ca.player.assists;
+      const productivityFactor = Math.min(contributions / 15, 1);
+      const rolePenalty =
+        ca.player.role === "both" ? 0.20 :
+        ca.player.role === "scorer" ? 0.15 : 0.10;
+      penalty += rolePenalty * productivityFactor;
+    }
+
+    const nonCriticalCount = (injuries ?? []).filter(
+      (inj) => !isCriticalPlayer(inj.player)
+    ).length;
+    penalty += nonCriticalCount * 0.03;
+
+    return Math.min(penalty, 0.8);
+  };
+
+  const homeInjPenalty = computeInjuryPenalty(homeInjuries, homeCriticalAbsences);
+  const awayInjPenalty = computeInjuryPenalty(awayInjuries, awayCriticalAbsences);
+  const homeInjScore = 1 - homeInjPenalty;
+  const awayInjScore = 1 - awayInjPenalty;
+
   const homeInjCount = homeInjuries?.length ?? 0;
   const awayInjCount = awayInjuries?.length ?? 0;
-  const maxInj = Math.max(homeInjCount, awayInjCount, 1);
-  const homeInjScore = 1 - homeInjCount / (maxInj + 5);
-  const awayInjScore = 1 - awayInjCount / (maxInj + 5);
+  const homeCritCount = homeCriticalAbsences?.length ?? 0;
+  const awayCritCount = awayCriticalAbsences?.length ?? 0;
   factors.push({
     label: "Joueurs absents",
-    homeValue: `${homeInjCount} absent${homeInjCount !== 1 ? "s" : ""}`,
-    awayValue: `${awayInjCount} absent${awayInjCount !== 1 ? "s" : ""}`,
-    weight: 0.06,
+    homeValue: homeCritCount > 0 ? `${homeInjCount} (${homeCritCount} clés)` : `${homeInjCount} absent${homeInjCount !== 1 ? "s" : ""}`,
+    awayValue: awayCritCount > 0 ? `${awayInjCount} (${awayCritCount} clés)` : `${awayInjCount} absent${awayInjCount !== 1 ? "s" : ""}`,
+    weight: 0.08,
   });
 
-  // 8. Squad quality (5%)
-  const homeSquadScore = homeSquadQuality ?? 0.5;
-  const awaySquadScore = awaySquadQuality ?? 0.5;
+  // 7. Squad quality (4%)
+  const homeSquadScore = safeNum(homeSquadQuality, 0.5);
+  const awaySquadScore = safeNum(awaySquadQuality, 0.5);
   factors.push({
     label: "Qualité effectif",
     homeValue: `${Math.round(homeSquadScore * 100)}%`,
     awayValue: `${Math.round(awaySquadScore * 100)}%`,
-    weight: 0.05,
+    weight: 0.04,
   });
 
-  // 9. Schedule fatigue (5%)
+  // 8. Schedule fatigue (6%)
   let homeFatigueScore = 0.5;
   let awayFatigueScore = 0.5;
   let homeFatigueLabel = "N/A";
   let awayFatigueLabel = "N/A";
 
   if (fatigue) {
-    const fatigueScore = (t: typeof fatigue.home) => {
+    const fatigueScoreFn = (t: typeof fatigue.home) => {
       let restScore = 0.5;
       if (t.daysSinceLastMatch !== null) {
         const d = t.daysSinceLastMatch;
         restScore = d <= 1 ? 0.2 : d === 2 ? 0.4 : d <= 4 ? 0.6 : 0.8;
       }
-      const loadScore = Math.max(0, 1 - t.matchesLast30Days / 12);
+      const loadScore = Math.max(0, 1 - safeNum(t.matchesLast30Days, 4) / 12);
       return restScore * 0.6 + loadScore * 0.4;
     };
 
-    homeFatigueScore = fatigueScore(fatigue.home);
-    awayFatigueScore = fatigueScore(fatigue.away);
+    homeFatigueScore = fatigueScoreFn(fatigue.home);
+    awayFatigueScore = fatigueScoreFn(fatigue.away);
 
     const fmtFatigue = (t: typeof fatigue.home) => {
       const parts: string[] = [];
@@ -228,21 +251,25 @@ export function calculateStats(
     label: "Fatigue calendrier",
     homeValue: homeFatigueLabel,
     awayValue: awayFatigueLabel,
-    weight: 0.05,
+    weight: 0.06,
   });
 
-  // 10. Head-to-head (3%)
+  // 9. Head-to-head (2%) — PPM-style: draws count as 1/3 victory
   const h2hTotal = headToHead ? headToHead.team1Wins + headToHead.draws + headToHead.team2Wins : 0;
-  const homeH2HScore = h2hTotal > 0 ? headToHead!.team1Wins / h2hTotal : 0.5;
-  const awayH2HScore = h2hTotal > 0 ? headToHead!.team2Wins / h2hTotal : 0.5;
+  const homeH2HScore = h2hTotal > 0
+    ? (headToHead!.team1Wins * 3 + headToHead!.draws) / (h2hTotal * 3)
+    : 0.5;
+  const awayH2HScore = h2hTotal > 0
+    ? (headToHead!.team2Wins * 3 + headToHead!.draws) / (h2hTotal * 3)
+    : 0.5;
   factors.push({
     label: "Confrontations directes",
     homeValue: h2hTotal > 0 ? `${headToHead!.team1Wins}V ${headToHead!.draws}N ${headToHead!.team2Wins}D` : "N/A",
     awayValue: h2hTotal > 0 ? `${headToHead!.team2Wins}V ${headToHead!.draws}N ${headToHead!.team1Wins}D` : "N/A",
-    weight: 0.03,
+    weight: 0.02,
   });
 
-  // 11. Defensive solidity (3%)
+  // 10. Defensive solidity (2%)
   let homeDefScore = 0.5;
   let awayDefScore = 0.5;
   let homeDefLabel = "N/A";
@@ -270,12 +297,78 @@ export function calculateStats(
     label: "Solidité défensive",
     homeValue: homeDefLabel,
     awayValue: awayDefLabel,
-    weight: 0.03,
+    weight: 0.02,
   });
 
-  // ====== MARKET ANCHOR (12%) ======
+  // 11. Strength of Schedule (5%)
+  const homeSOSScore = homeSOS ? safeNum(homeSOS.sosScore, 0.5) : 0.5;
+  const awaySOSScore = awaySOS ? safeNum(awaySOS.sosScore, 0.5) : 0.5;
+  factors.push({
+    label: "Difficulté calendrier",
+    homeValue: homeSOS ? `Top ${Math.round((1 - homeSOS.sosScore) * 100)}% (avg pos ${homeSOS.recentOpponentsAvgPosition})` : "N/A",
+    awayValue: awaySOS ? `Top ${Math.round((1 - awaySOS.sosScore) * 100)}% (avg pos ${awaySOS.recentOpponentsAvgPosition})` : "N/A",
+    weight: 0.05,
+  });
 
-  // 12. Bookmaker odds (12%) — the market is the strongest single predictor
+  // 12. Match Context / Stakes (4%)
+  let homeContextScore = 0.5;
+  let awayContextScore = 0.5;
+
+  const stakesValue: Record<Stakes, number> = {
+    title: 0.65,
+    europe: 0.58,
+    midtable: 0.50,
+    relegation: 0.55,
+  };
+  const stakeLabels: Record<Stakes, string> = {
+    title: "Titre",
+    europe: "Europe",
+    midtable: "Mi-tableau",
+    relegation: "Maintien",
+  };
+
+  if (matchContext) {
+    homeContextScore = stakesValue[matchContext.homeStakes];
+    awayContextScore = stakesValue[matchContext.awayStakes];
+
+    if (matchContext.isDerby) {
+      homeContextScore = homeContextScore * 0.85 + 0.5 * 0.15;
+      awayContextScore = awayContextScore * 0.85 + 0.5 * 0.15;
+    }
+  }
+
+  factors.push({
+    label: "Enjeux du match",
+    homeValue: matchContext ? `${stakeLabels[matchContext.homeStakes]}${matchContext.isDerby ? " (Derby)" : ""}` : "N/A",
+    awayValue: matchContext ? `${stakeLabels[matchContext.awayStakes]}${matchContext.isDerby ? " (Derby)" : ""}` : "N/A",
+    weight: 0.04,
+  });
+
+  // 13. Referee profile (2%)
+  let homeRefScore = 0.5;
+  let awayRefScore = 0.5;
+  let refLabel = "N/A";
+
+  if (referee && referee.matchesOfficiated >= 3) {
+    const severityScore = Math.min(1, (safeNum(referee.avgYellowsPerMatch, 3.5) - 2) / 4);
+    const penaltyRate = safeNum(referee.penaltiesAwarded, 0) / Math.max(1, safeNum(referee.matchesOfficiated, 1));
+    const penaltyFactor = Math.min(1, penaltyRate / 0.4);
+    const baseRefScore = Math.max(0.2, Math.min(0.8, 0.5 - severityScore * 0.05 + penaltyFactor * 0.03));
+    homeRefScore = baseRefScore;
+    awayRefScore = baseRefScore;
+    refLabel = `${referee.name} (${referee.avgYellowsPerMatch} j/m)`;
+  }
+
+  factors.push({
+    label: "Profil arbitre",
+    homeValue: refLabel,
+    awayValue: refLabel,
+    weight: 0.02,
+  });
+
+  // ====== MARKET ANCHOR (25%) ======
+
+  // 14. Bookmaker odds (25%) — the market is the strongest single predictor
   let homeOddsScore = 0.5;
   let awayOddsScore = 0.5;
   let homeOddsLabel = "N/A";
@@ -286,7 +379,6 @@ export function calculateStats(
     const drawProb = oddsToProb(odds.draw);
     const awayProb = oddsToProb(odds.awayWin);
     const totalProb = homeProb + drawProb + awayProb;
-    // Normalize (remove bookmaker margin)
     const normHome = homeProb / totalProb;
     const normAway = awayProb / totalProb;
     homeOddsScore = normHome;
@@ -299,69 +391,105 @@ export function calculateStats(
     label: "Cotes du marché",
     homeValue: homeOddsLabel,
     awayValue: awayOddsLabel,
-    weight: 0.12,
+    weight: 0.25,
   });
 
   // ====== WEIGHTED COMPOSITE ======
-  // Total = 14+12+12+14+12+6+6+5+5+3+3+12 = 104%... let me recheck
-  // ELO 14 + xG 12 + PPM 12 + Form 14 + Venue 12 + GD 6 + Inj 6 + Squad 5 + Fatigue 5 + H2H 3 + Def 3 + Odds 12 = 104
-  // Need to fix: reduce to 100. Let me adjust.
-  // ELO 12 + xG 10 + PPM 10 + Form 12 + Venue 10 + GD 6 + Inj 6 + Squad 5 + Fatigue 5 + H2H 3 + Def 3 + Odds 18 = 100
+  // Odds 25 + xG 12 + Venue 10 + Form 8 + ELO 7 + Injuries 8 + xGTrend 5 + SOS 5 + Fatigue 6 + Squad 4 + H2H 2 + Def 2 + Context 4 + Referee 2 = 100%
 
-  // Actually let me use the weights as declared in factors above and just normalize
+  const oddsAvailable = !!odds;
+  const oddsWeight = oddsAvailable ? 0.25 : 0;
+  const redistributionFactor = oddsAvailable ? 1 : 1 / (1 - 0.25);
+
   const homeTotal =
-    homeEloScore * 0.14 +
-    homeXGScore * 0.12 +
-    homePPMScore * 0.12 +
-    homeFormScore * 0.14 +
-    homeVenueScore * 0.12 +
-    homeGDScore * 0.06 +
-    homeInjScore * 0.06 +
-    homeSquadScore * 0.05 +
-    homeFatigueScore * 0.05 +
-    homeH2HScore * 0.03 +
-    homeDefScore * 0.03 +
-    homeOddsScore * 0.12;
+    homeOddsScore * oddsWeight +
+    (homeXGScore * 0.12 +
+    homeVenueScore * 0.10 +
+    homeFormScore * 0.08 +
+    homeEloScore * 0.07 +
+    homeInjScore * 0.08 +
+    homeXGTrendScore * 0.05 +
+    homeSOSScore * 0.05 +
+    homeFatigueScore * 0.06 +
+    homeSquadScore * 0.04 +
+    homeH2HScore * 0.02 +
+    homeDefScore * 0.02 +
+    homeContextScore * 0.04 +
+    homeRefScore * 0.02) * redistributionFactor;
 
   const awayTotal =
-    awayEloScore * 0.14 +
-    awayXGScore * 0.12 +
-    awayPPMScore * 0.12 +
-    awayFormScore * 0.14 +
-    awayVenueScore * 0.12 +
-    awayGDScore * 0.06 +
-    awayInjScore * 0.06 +
-    awaySquadScore * 0.05 +
-    awayFatigueScore * 0.05 +
-    awayH2HScore * 0.03 +
-    awayDefScore * 0.03 +
-    awayOddsScore * 0.12;
+    awayOddsScore * oddsWeight +
+    (awayXGScore * 0.12 +
+    awayVenueScore * 0.10 +
+    awayFormScore * 0.08 +
+    awayEloScore * 0.07 +
+    awayInjScore * 0.08 +
+    awayXGTrendScore * 0.05 +
+    awaySOSScore * 0.05 +
+    awayFatigueScore * 0.06 +
+    awaySquadScore * 0.04 +
+    awayH2HScore * 0.02 +
+    awayDefScore * 0.02 +
+    awayContextScore * 0.04 +
+    awayRefScore * 0.02) * redistributionFactor;
 
-  // Normalize weights (sum = 1.04, so divide by 1.04)
-  const weightSum = 0.14 + 0.12 + 0.12 + 0.14 + 0.12 + 0.06 + 0.06 + 0.05 + 0.05 + 0.03 + 0.03 + 0.12;
-  const homeNorm = homeTotal / weightSum;
-  const awayNorm = awayTotal / weightSum;
-  const diff = homeNorm - awayNorm;
+  const diff = homeTotal - awayTotal;
 
-  // Draw probability: Gaussian decay from 27% baseline
-  let drawScore = Math.max(0.08, 0.27 * Math.exp(-4 * diff * diff));
+  // Draw probability: steeper Gaussian (-6 instead of -4) for better discrimination
+  let drawScore = Math.max(0.08, 0.27 * Math.exp(-6 * diff * diff));
+
+  // Blend with bookmaker draw probability: 40% model / 60% market (market estimates draws better)
+  if (odds) {
+    const drawProb = oddsToProb(odds.draw);
+    const totalProb = oddsToProb(odds.homeWin) + drawProb + oddsToProb(odds.awayWin);
+    const drawImplied = drawProb / totalProb;
+    drawScore = drawScore * 0.4 + drawImplied * 0.6;
+  }
+
+  // Context-driven draw adjustments
+  if (matchContext) {
+    const { homeStakes, awayStakes, isDerby } = matchContext;
+    if (homeStakes === "relegation" && awayStakes === "relegation") {
+      drawScore += 0.05;
+    } else if (homeStakes === "title" && awayStakes === "title") {
+      drawScore += 0.02;
+    }
+    if (isDerby) {
+      drawScore += 0.03;
+    }
+  }
+
+  // Strict referee micro-boost for draw
+  if (referee && referee.matchesOfficiated >= 3) {
+    const severityScore = Math.min(1, (safeNum(referee.avgYellowsPerMatch, 3.5) - 2) / 4);
+    if (severityScore > 0.6) {
+      drawScore += 0.01;
+    }
+  }
 
   // Remaining probability split using tanh
   const remaining = 1 - drawScore;
   const favorBias = Math.tanh(diff * 2.5);
-  let homeScore = remaining * (0.5 + favorBias * 0.40);
-  let awayScore = remaining * (0.5 - favorBias * 0.40);
+  let homeScore = remaining * (0.5 + favorBias * 0.35);
+  let awayScore = remaining * (0.5 - favorBias * 0.35);
 
-  // Safety clamp
-  homeScore = Math.max(0.05, Math.min(0.85, homeScore));
-  awayScore = Math.max(0.05, Math.min(0.85, awayScore));
-  drawScore = Math.max(0.08, Math.min(0.35, drawScore));
+  // Safety clamp (tighter when odds are absent — less reliable model)
+  const maxClamp = oddsAvailable ? 0.85 : 0.75;
+  homeScore = Math.max(0.05, Math.min(maxClamp, homeScore));
+  awayScore = Math.max(0.05, Math.min(maxClamp, awayScore));
+  drawScore = Math.max(0.08, Math.min(0.40, drawScore));
 
   // Renormalize
   const sum = homeScore + drawScore + awayScore;
   homeScore /= sum;
   drawScore /= sum;
   awayScore /= sum;
+
+  // Final NaN safety net — if anything slipped through, return neutral prediction
+  if (Number.isNaN(homeScore) || Number.isNaN(drawScore) || Number.isNaN(awayScore)) {
+    console.error("[prediction-engine] NaN detected — returning neutral prediction");
+    return { homeScore: 40, drawScore: 25, awayScore: 35, factors };
+  }
 
   return {
     homeScore: Math.round(homeScore * 100),

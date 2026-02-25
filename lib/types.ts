@@ -174,11 +174,46 @@ export interface TeamXG {
   xGPerMatch: number;
   xGAPerMatch: number;
   xGDiff: number; // xG - actual goals (positive = unlucky, negative = lucky)
+  recentXGPerMatch?: number;   // xG/match sur les 5 derniers matchs
+  recentXGAPerMatch?: number;  // xGA/match sur les 5 derniers matchs
+  xGTrend?: number;            // -1 à +1 (positif = en progression)
 }
 
 export interface TeamElo {
   team: string;
   elo: number;
+}
+
+export interface StrengthOfSchedule {
+  teamId: number;
+  recentOpponentsAvgPosition: number;
+  recentOpponentsAvgPPM: number;
+  sosScore: number; // 0-1 (1 = calendrier le plus difficile)
+}
+
+export interface CalculateStatsInput {
+  homeStanding: Standing;
+  awayStanding: Standing;
+  totalTeams: number;
+  homeInjuries?: Injury[];
+  awayInjuries?: Injury[];
+  homeSquadQuality?: number;
+  awaySquadQuality?: number;
+  headToHead?: HeadToHeadRecord;
+  homeTactics?: TacticalProfile | null;
+  awayTactics?: TacticalProfile | null;
+  fatigue?: ScheduleFatigue | null;
+  homeXG?: TeamXG | null;
+  awayXG?: TeamXG | null;
+  homeElo?: TeamElo | null;
+  awayElo?: TeamElo | null;
+  odds?: MatchOdds | null;
+  homeSOS?: StrengthOfSchedule | null;
+  awaySOS?: StrengthOfSchedule | null;
+  homeCriticalAbsences?: CriticalAbsence[];
+  awayCriticalAbsences?: CriticalAbsence[];
+  matchContext?: MatchContext | null;
+  referee?: RefereeProfile | null;
 }
 
 export interface PredictionAnalysis {

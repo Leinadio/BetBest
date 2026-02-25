@@ -1,4 +1,4 @@
-import { HeadToHeadRecord, Match, ScheduleFatigue, Standing, TeamFatigue } from "./types";
+import { HeadToHeadRecord, Match, ScheduleFatigue, Standing, StrengthOfSchedule, TeamFatigue } from "./types";
 
 const BASE_URL = "https://api.football-data.org/v4";
 
@@ -110,13 +110,74 @@ export async function getRecentForm(
     teamResults.get(m.awayTeam.id)!.push(awayResult);
   }
 
-  // Garder les 5 derniers résultats par équipe
+  // Garder les 5 derniers résultats par équipe (récent → ancien, cohérent avec standings.form)
   const formMap = new Map<number, string>();
   for (const [teamId, results] of teamResults) {
-    formMap.set(teamId, results.slice(-5).join(","));
+    formMap.set(teamId, results.slice(-5).reverse().join(","));
   }
 
   return formMap;
+}
+
+export async function getFinishedMatches(
+  leagueCode: string
+): Promise<FinishedMatchesResponse["matches"]> {
+  // Same URL as getRecentForm — Next.js revalidate cache ensures single HTTP call
+  const data = await fetchAPI<FinishedMatchesResponse>(
+    `/competitions/${leagueCode}/matches?status=FINISHED`
+  );
+  return data.matches;
+}
+
+export function computeStrengthOfSchedule(
+  teamId: number,
+  finishedMatches: FinishedMatchesResponse["matches"],
+  standings: Standing[]
+): StrengthOfSchedule | null {
+  const teamMatches = finishedMatches
+    .filter(
+      (m) =>
+        m.score.fullTime.home !== null &&
+        (m.homeTeam.id === teamId || m.awayTeam.id === teamId)
+    )
+    .slice(-5);
+
+  if (teamMatches.length === 0) return null;
+
+  const totalTeams = standings.length;
+  let sumPosition = 0;
+  let sumPPM = 0;
+  let counted = 0;
+
+  for (const m of teamMatches) {
+    const oppId = m.homeTeam.id === teamId ? m.awayTeam.id : m.homeTeam.id;
+    const oppStanding = standings.find((s) => s.team.id === oppId);
+    if (oppStanding) {
+      sumPosition += oppStanding.position;
+      sumPPM +=
+        oppStanding.playedGames > 0
+          ? oppStanding.points / oppStanding.playedGames
+          : 0;
+      counted++;
+    }
+  }
+
+  if (counted === 0) return null;
+
+  const avgPosition = sumPosition / counted;
+  const avgPPM = sumPPM / counted;
+  // Lower avg position = faced stronger teams = higher SOS
+  const sosScore = Math.max(
+    0,
+    Math.min(1, 1 - (avgPosition - 1) / (totalTeams - 1))
+  );
+
+  return {
+    teamId,
+    recentOpponentsAvgPosition: Math.round(avgPosition * 10) / 10,
+    recentOpponentsAvgPPM: Math.round(avgPPM * 100) / 100,
+    sosScore: Math.round(sosScore * 100) / 100,
+  };
 }
 
 interface H2HMatchesResponse {

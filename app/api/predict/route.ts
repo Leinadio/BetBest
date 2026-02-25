@@ -1,6 +1,6 @@
 import { analyzePrediction } from "@/lib/claude-analyzer";
 import { getAllEloRatings, findTeamElo } from "@/lib/elo-api";
-import { getHeadToHead, getMatchScheduleData, getRecentForm, getStandings } from "@/lib/football-api";
+import { computeStrengthOfSchedule, getFinishedMatches, getHeadToHead, getMatchScheduleData, getRecentForm, getStandings } from "@/lib/football-api";
 import { findTeamInjuries, getInjuries } from "@/lib/injuries-api";
 import { getTeamNews } from "@/lib/news-api";
 import { buildTeamPlayerAnalysis, findTeamKeyPlayers, findTeamPlayerForm, getKeyPlayers, getRecentPlayerForm } from "@/lib/players-api";
@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const [standings, allInjuries, allKeyPlayers, formMap, allPlayerForms, teamIdMap, headToHead, leagueXG, allElo] = await Promise.all([
+    const [standings, allInjuries, allKeyPlayers, formMap, allPlayerForms, teamIdMap, headToHead, leagueXG, allElo, finishedMatches] = await Promise.all([
       getStandings(league),
       getInjuries(league),
       getKeyPlayers(league),
@@ -48,6 +48,7 @@ export async function POST(request: NextRequest) {
       getHeadToHead(league, homeTeamId, awayTeamId),
       getLeagueXG(league),
       getAllEloRatings(),
+      getFinishedMatches(league),
     ]);
 
     // Enrichir les standings avec la forme calculée
@@ -86,6 +87,8 @@ export async function POST(request: NextRequest) {
     const awayXG = findTeamXG(leagueXG, awayStanding.team.name);
     const homeElo = findTeamElo(allElo, homeStanding.team.name);
     const awayElo = findTeamElo(allElo, awayStanding.team.name);
+    const homeSOS = computeStrengthOfSchedule(homeTeamId, finishedMatches, standings);
+    const awaySOS = computeStrengthOfSchedule(awayTeamId, finishedMatches, standings);
 
     const matchContext = getMatchContext(homeStanding, awayStanding, standings.length);
 
@@ -106,14 +109,14 @@ export async function POST(request: NextRequest) {
       : null;
 
     // Calculate stats AFTER tactics & fatigue are available
-    const statsScore = calculateStats(
+    const statsScore = calculateStats({
       homeStanding,
       awayStanding,
-      standings.length,
+      totalTeams: standings.length,
       homeInjuries,
       awayInjuries,
-      homePlayerAnalysis.squadQualityScore,
-      awayPlayerAnalysis.squadQualityScore,
+      homeSquadQuality: homePlayerAnalysis.squadQualityScore,
+      awaySquadQuality: awayPlayerAnalysis.squadQualityScore,
       headToHead,
       homeTactics,
       awayTactics,
@@ -123,7 +126,13 @@ export async function POST(request: NextRequest) {
       homeElo,
       awayElo,
       odds,
-    );
+      homeSOS,
+      awaySOS,
+      homeCriticalAbsences: homePlayerAnalysis.criticalAbsences,
+      awayCriticalAbsences: awayPlayerAnalysis.criticalAbsences,
+      matchContext,
+      referee,
+    });
 
     const prediction = await analyzePrediction({
       homeTeam: homeStanding.team,
@@ -151,6 +160,8 @@ export async function POST(request: NextRequest) {
       awayXG,
       homeElo,
       awayElo,
+      homeSOS,
+      awaySOS,
     });
 
     return NextResponse.json(prediction);

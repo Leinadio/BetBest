@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { HeadToHeadRecord, Injury, MatchContext, MatchOdds, NewsArticle, PlayerForm, Prediction, PredictionAnalysis, RefereeProfile, ScheduleFatigue, Standing, StatsScore, TacticalProfile, Team, TeamElo, TeamPlayerAnalysis, TeamXG } from "./types";
+import { HeadToHeadRecord, Injury, MatchContext, MatchOdds, NewsArticle, PlayerForm, Prediction, PredictionAnalysis, RefereeProfile, ScheduleFatigue, Standing, StatsScore, StrengthOfSchedule, TacticalProfile, Team, TeamElo, TeamPlayerAnalysis, TeamXG } from "./types";
 
 const anthropic = new Anthropic();
 
@@ -29,6 +29,8 @@ interface AnalyzeParams {
   awayXG?: TeamXG | null;
   homeElo?: TeamElo | null;
   awayElo?: TeamElo | null;
+  homeSOS?: StrengthOfSchedule | null;
+  awaySOS?: StrengthOfSchedule | null;
 }
 
 export async function analyzePrediction({
@@ -57,6 +59,8 @@ export async function analyzePrediction({
   awayXG,
   homeElo,
   awayElo,
+  homeSOS,
+  awaySOS,
 }: AnalyzeParams): Promise<Prediction> {
   const formatInjuries = (injuries: Injury[] | undefined): string => {
     if (!injuries || injuries.length === 0) return "Aucune absence signalée";
@@ -249,6 +253,14 @@ ${homeElo && awayElo ? `Écart : ${Math.round(homeElo.elo - awayElo.elo)} points
 ${homeXG ? `${homeTeam.name} : ${homeXG.xGPerMatch} xG/match, ${homeXG.xGAPerMatch} xGA/match (${homeXG.matches}m) — diff réel vs xG: ${homeXG.xGDiff > 0 ? "+" : ""}${homeXG.xGDiff} (${homeXG.xGDiff > 2 ? "très malchanceux" : homeXG.xGDiff > 0 ? "sous-performe" : homeXG.xGDiff < -2 ? "très chanceux" : "sur-performe"})` : `${homeTeam.name} : Données xG indisponibles`}
 ${awayXG ? `${awayTeam.name} : ${awayXG.xGPerMatch} xG/match, ${awayXG.xGAPerMatch} xGA/match (${awayXG.matches}m) — diff réel vs xG: ${awayXG.xGDiff > 0 ? "+" : ""}${awayXG.xGDiff} (${awayXG.xGDiff > 2 ? "très malchanceux" : awayXG.xGDiff > 0 ? "sous-performe" : awayXG.xGDiff < -2 ? "très chanceux" : "sur-performe"})` : `${awayTeam.name} : Données xG indisponibles`}
 
+[xG — MOMENTUM (5 derniers matchs)]
+${homeXG?.recentXGPerMatch != null ? `${homeTeam.name} : ${homeXG.recentXGPerMatch} xG/m, ${homeXG.recentXGAPerMatch} xGA/m (récent) vs ${homeXG.xGPerMatch} xG/m, ${homeXG.xGAPerMatch} xGA/m (saison) — tendance: ${homeXG.xGTrend != null ? (homeXG.xGTrend > 0.05 ? `↑ EN PROGRESSION (+${homeXG.xGTrend.toFixed(2)})` : homeXG.xGTrend < -0.05 ? `↓ EN RÉGRESSION (${homeXG.xGTrend.toFixed(2)})` : `→ STABLE (${homeXG.xGTrend.toFixed(2)})`) : "N/A"}` : `${homeTeam.name} : Données momentum indisponibles`}
+${awayXG?.recentXGPerMatch != null ? `${awayTeam.name} : ${awayXG.recentXGPerMatch} xG/m, ${awayXG.recentXGAPerMatch} xGA/m (récent) vs ${awayXG.xGPerMatch} xG/m, ${awayXG.xGAPerMatch} xGA/m (saison) — tendance: ${awayXG.xGTrend != null ? (awayXG.xGTrend > 0.05 ? `↑ EN PROGRESSION (+${awayXG.xGTrend.toFixed(2)})` : awayXG.xGTrend < -0.05 ? `↓ EN RÉGRESSION (${awayXG.xGTrend.toFixed(2)})` : `→ STABLE (${awayXG.xGTrend.toFixed(2)})`) : "N/A"}` : `${awayTeam.name} : Données momentum indisponibles`}
+
+[DIFFICULTÉ DU CALENDRIER RÉCENT (SOS)]
+${homeSOS ? `${homeTeam.name} : Position moyenne des 5 derniers adversaires: ${homeSOS.recentOpponentsAvgPosition} — PPM moyen adversaires: ${homeSOS.recentOpponentsAvgPPM} — Score SOS: ${homeSOS.sosScore} (${homeSOS.sosScore > 0.6 ? "calendrier difficile" : homeSOS.sosScore < 0.4 ? "calendrier facile" : "calendrier moyen"})` : `${homeTeam.name} : Données SOS indisponibles`}
+${awaySOS ? `${awayTeam.name} : Position moyenne des 5 derniers adversaires: ${awaySOS.recentOpponentsAvgPosition} — PPM moyen adversaires: ${awaySOS.recentOpponentsAvgPPM} — Score SOS: ${awaySOS.sosScore} (${awaySOS.sosScore > 0.6 ? "calendrier difficile" : awaySOS.sosScore < 0.4 ? "calendrier facile" : "calendrier moyen"})` : `${awayTeam.name} : Données SOS indisponibles`}
+
 [CLASSEMENT]
 ${homeTeam.name} : ${homeStanding.position}e — ${homeStanding.points} pts (${homeStanding.playedGames}J) — ${homeStanding.won}V ${homeStanding.draw}N ${homeStanding.lost}D — Buts: ${homeStanding.goalsFor}/${homeStanding.goalsAgainst} (diff: ${homeStanding.goalDifference > 0 ? "+" : ""}${homeStanding.goalDifference}) — Forme: ${homeStanding.form ?? "N/A"}
 ${awayTeam.name} : ${awayStanding.position}e — ${awayStanding.points} pts (${awayStanding.playedGames}J) — ${awayStanding.won}V ${awayStanding.draw}N ${awayStanding.lost}D — Buts: ${awayStanding.goalsFor}/${awayStanding.goalsAgainst} (diff: ${awayStanding.goalDifference > 0 ? "+" : ""}${awayStanding.goalDifference}) — Forme: ${awayStanding.form ?? "N/A"}
@@ -288,7 +300,7 @@ ${formatFatigue(fatigue)}
 [ENJEUX]
 ${formatMatchContext(matchContext)}
 
-[MODÈLE STATISTIQUE — 8 facteurs pondérés]
+[MODÈLE STATISTIQUE — 14 facteurs pondérés]
 ${statsScore.factors.map((f) => `${f.label} (${Math.round(f.weight * 100)}%) : ${f.homeValue} vs ${f.awayValue}`).join("\n")}
 → Résultat : 1=${statsScore.homeScore}% N=${statsScore.drawScore}% 2=${statsScore.awayScore}%
 
@@ -302,8 +314,10 @@ En utilisant [CLASSEMENT] + [MODÈLE STATISTIQUE] :
 - L'écart est-il large ou serré ?
 
 ÉTAPE 2 — DYNAMIQUE RÉCENTE
-En croisant [CLASSEMENT].forme + [FORME RÉCENTE DES JOUEURS] + [ACTUALITÉS] :
+En croisant [CLASSEMENT].forme + [xG MOMENTUM] + [SOS] + [FORME RÉCENTE DES JOUEURS] + [ACTUALITÉS] :
 - Les 5 derniers résultats confirment-ils ou contredisent-ils le rapport de force ?
+- Le momentum xG confirme-t-il la forme ? (une équipe qui gagne mais dont les xG baissent = régression probable, et inversement)
+- Le SOS contextualise-t-il les résultats ? (5V contre des équipes mal classées ≠ 5V contre le top 6)
 - Les joueurs clés sont-ils en forme ou en méforme ? (buts/passes récents vs stats saison)
 - Y a-t-il des news impactantes (changement coach, tension vestiaire, série historique) ?
 
