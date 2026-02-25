@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Match, Prediction } from "@/lib/types";
 import { LeagueSelector } from "./league-selector";
 import { MatchList } from "./match-list";
@@ -53,7 +53,15 @@ export function PredictionForm() {
       .finally(() => setMatchesLoading(false));
   }, [league]);
 
+  const abortRef = useRef<AbortController | null>(null);
+
   async function handleSelectMatch(match: Match) {
+    // Abort any in-flight prediction request
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const timeout = setTimeout(() => controller.abort(), 60_000); // 60s timeout
+
     setSelectedMatch(match);
     setLoading(true);
     setError(null);
@@ -67,20 +75,35 @@ export function PredictionForm() {
           league,
           homeTeamId: match.homeTeam.id,
           awayTeamId: match.awayTeam.id,
+          matchDate: match.utcDate,
         }),
+        signal: controller.signal,
       });
 
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "Erreur de prediction");
+        let errorMsg = "Erreur de prédiction";
+        try {
+          const data = await res.json();
+          errorMsg = data.error || errorMsg;
+        } catch { /* response wasn't JSON (timeout, proxy error, etc.) */ }
+        throw new Error(errorMsg);
       }
 
       const data: Prediction = await res.json();
       setPrediction(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erreur inattendue");
+      // Only update state if this controller is still the active one (avoids race condition)
+      if (abortRef.current !== controller) return;
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setError("L'analyse a pris trop de temps. Réessayez.");
+      } else {
+        setError(err instanceof Error ? err.message : "Erreur inattendue");
+      }
     } finally {
-      setLoading(false);
+      clearTimeout(timeout);
+      if (abortRef.current === controller) {
+        setLoading(false);
+      }
     }
   }
 

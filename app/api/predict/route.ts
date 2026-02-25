@@ -12,7 +12,7 @@ import { getLeagueXG, findTeamXG } from "@/lib/understat-api";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(request: NextRequest) {
-  let body: { league: string; homeTeamId: number; awayTeamId: number };
+  let body: { league: string; homeTeamId: number; awayTeamId: number; matchDate?: string };
 
   try {
     body = await request.json();
@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Corps de requête invalide" }, { status: 400 });
   }
 
-  const { league, homeTeamId, awayTeamId } = body;
+  const { league, homeTeamId, awayTeamId, matchDate } = body;
 
   if (!league || !LEAGUES.some((l) => l.code === league)) {
     return NextResponse.json({ error: "Ligue invalide" }, { status: 400 });
@@ -38,17 +38,27 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    // Non-critical calls: failures return fallback instead of crashing the entire prediction
+    async function safeCall<T>(fn: () => Promise<T>, fallback: T, label: string): Promise<T> {
+      try { return await fn(); } catch (err) {
+        console.warn(`[predict] Non-critical call failed (${label}):`, err);
+        return fallback;
+      }
+    }
+
+    const emptyH2H = { matches: [] as { date: string; homeTeam: string; awayTeam: string; homeGoals: number; awayGoals: number }[], team1Wins: 0, draws: 0, team2Wins: 0 };
+
     const [standings, allInjuries, allKeyPlayers, formMap, allPlayerForms, teamIdMap, headToHead, leagueXG, allElo, finishedMatches] = await Promise.all([
-      getStandings(league),
-      getInjuries(league),
-      getKeyPlayers(league),
-      getRecentForm(league),
-      getRecentPlayerForm(league),
-      getLeagueTeamIds(league),
-      getHeadToHead(league, homeTeamId, awayTeamId),
-      getLeagueXG(league),
-      getAllEloRatings(),
-      getFinishedMatches(league),
+      getStandings(league), // Critical — no standings = no prediction
+      safeCall(() => getInjuries(league), {}, "injuries"),
+      safeCall(() => getKeyPlayers(league), {}, "keyPlayers"),
+      safeCall(() => getRecentForm(league), new Map<number, string>(), "recentForm"),
+      safeCall(() => getRecentPlayerForm(league), {}, "playerForms"),
+      safeCall(() => getLeagueTeamIds(league), new Map<string, number>(), "teamIds"),
+      safeCall(() => getHeadToHead(league, homeTeamId, awayTeamId), emptyH2H, "h2h"),
+      safeCall(() => getLeagueXG(league), {}, "xG"),
+      safeCall(() => getAllEloRatings(), [], "elo"),
+      safeCall(() => getFinishedMatches(league), [], "finishedMatches"),
     ]);
 
     // Enrichir les standings avec la forme calculée
@@ -92,27 +102,41 @@ export async function POST(request: NextRequest) {
 
     const matchContext = getMatchContext(homeStanding, awayStanding, standings.length);
 
+    const defaultSchedule = { fatigue: null as import("@/lib/types").ScheduleFatigue | null, refereeName: null as string | null };
     const [homeNews, awayNews, homeTactics, awayTactics, scheduleData, odds] = await Promise.all([
-      getTeamNews(homeStanding.team.name),
-      getTeamNews(awayStanding.team.name),
-      homeApiId ? getTeamTactics(homeApiId, league) : Promise.resolve(null),
-      awayApiId ? getTeamTactics(awayApiId, league) : Promise.resolve(null),
-      getMatchScheduleData(league, homeTeamId, awayTeamId),
-      getMatchOdds(league, homeStanding.team.name, awayStanding.team.name),
+      safeCall(() => getTeamNews(homeStanding.team.name), [], "homeNews"),
+      safeCall(() => getTeamNews(awayStanding.team.name), [], "awayNews"),
+      safeCall(() => homeApiId ? getTeamTactics(homeApiId, league) : Promise.resolve(null), null, "homeTactics"),
+      safeCall(() => awayApiId ? getTeamTactics(awayApiId, league) : Promise.resolve(null), null, "awayTactics"),
+      safeCall(() => getMatchScheduleData(league, homeTeamId, awayTeamId), defaultSchedule, "scheduleData"),
+      safeCall(() => getMatchOdds(league, homeStanding.team.name, awayStanding.team.name), null, "odds"),
     ]);
 
     const fatigue = scheduleData.fatigue;
 
     // Referee: name from football-data.org, stats from API-Football (previous season)
     const referee = scheduleData.refereeName
-      ? await getRefereeStats(league, scheduleData.refereeName)
+      ? await safeCall(() => getRefereeStats(league, scheduleData.refereeName!), null, "referee")
       : null;
+
+    // Data quality logging — flag missing major sources
+    const missing: string[] = [];
+    if (!homeXG) missing.push(`xG(${homeStanding.team.name})`);
+    if (!awayXG) missing.push(`xG(${awayStanding.team.name})`);
+    if (!homeElo) missing.push(`ELO(${homeStanding.team.name})`);
+    if (!awayElo) missing.push(`ELO(${awayStanding.team.name})`);
+    if (!odds) missing.push("Cotes");
+    if (!homeTactics) missing.push(`Tactique(${homeStanding.team.name})`);
+    if (!awayTactics) missing.push(`Tactique(${awayStanding.team.name})`);
+    if (!referee) missing.push("Arbitre");
+    if (missing.length > 0) {
+      console.warn(`[predict] Données manquantes pour ${homeStanding.team.name} vs ${awayStanding.team.name}: ${missing.join(", ")}`);
+    }
 
     // Calculate stats AFTER tactics & fatigue are available
     const statsScore = calculateStats({
       homeStanding,
       awayStanding,
-      totalTeams: standings.length,
       homeInjuries,
       awayInjuries,
       homeSquadQuality: homePlayerAnalysis.squadQualityScore,
@@ -141,6 +165,7 @@ export async function POST(request: NextRequest) {
       awayStanding,
       statsScore,
       leagueCode: league,
+      matchDate,
       homeInjuries,
       awayInjuries,
       homePlayerAnalysis,

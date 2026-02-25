@@ -1,3 +1,4 @@
+import { normalizeTeamName } from "./normalize";
 import { TeamXG } from "./types";
 
 const UNDERSTAT_LEAGUES: Record<string, string> = {
@@ -62,7 +63,10 @@ export async function getLeagueXG(
       }
     );
 
-    if (!res.ok) return {};
+    if (!res.ok) {
+      if (cached) return cached.data;
+      return {};
+    }
 
     const data = (await res.json()) as UnderstatResponse;
     const result: Record<string, TeamXG> = {};
@@ -95,7 +99,7 @@ export async function getLeagueXG(
       const defenseDelta = seasonXGAPM - recentXGAPM;
       const xGTrend = Math.max(-1, Math.min(1, (attackDelta + defenseDelta) / 2));
 
-      result[team.title.toLowerCase()] = {
+      result[normalizeTeamName(team.title)] = {
         team: team.title,
         matches,
         xG: Math.round(totalXG * 100) / 100,
@@ -113,28 +117,128 @@ export async function getLeagueXG(
     return result;
   } catch (error) {
     console.error(`Understat xG fetch failed for ${leagueCode}:`, error);
+    // Stale-while-revalidate: return expired cache if available
+    if (cached) return cached.data;
     return {};
   }
 }
+
+// Aliases: football-data.org name (lowercased) -> Understat key (lowercased)
+const UNDERSTAT_ALIASES: Record<string, string> = {
+  // Germany
+  "fc bayern münchen": "bayern munich",
+  "bayern münchen": "bayern munich",
+  "bayer 04 leverkusen": "bayer leverkusen",
+  "rb leipzig": "rasenballsport leipzig",
+  "1. fc union berlin": "union berlin",
+  "1. fc köln": "koln",
+  "1. fc heidenheim 1846": "heidenheim",
+  "vfb stuttgart": "stuttgart",
+  "vfl wolfsburg": "wolfsburg",
+  "vfl bochum 1848": "bochum",
+  "tsg 1899 hoffenheim": "hoffenheim",
+  "sv werder bremen": "werder bremen",
+  "1. fsv mainz 05": "mainz 05",
+  "borussia mönchengladbach": "borussia m.gladbach",
+  // France
+  "paris saint-germain fc": "paris saint germain",
+  "paris saint-germain": "paris saint germain",
+  "olympique de marseille": "marseille",
+  "olympique lyonnais": "lyon",
+  "rc strasbourg alsace": "strasbourg",
+  "stade rennais fc 1901": "rennes",
+  "stade rennais fc": "rennes",
+  "as monaco fc": "monaco",
+  "as monaco": "monaco",
+  "losc lille": "lille",
+  "montpellier hsc": "montpellier",
+  "stade brestois 29": "brest",
+  "as saint-étienne": "saint-etienne",
+  "angers sco": "angers",
+  "le havre ac": "le havre",
+  // Spain
+  "club atlético de madrid": "atletico madrid",
+  "atlético de madrid": "atletico madrid",
+  "fc barcelona": "barcelona",
+  "real sociedad de fútbol": "real sociedad",
+  "rcd espanyol de barcelona": "espanyol",
+  "real betis balompié": "real betis",
+  "rc celta de vigo": "celta vigo",
+  "ca osasuna": "osasuna",
+  "rcd mallorca": "mallorca",
+  "ud las palmas": "las palmas",
+  "deportivo alavés": "alaves",
+  // Italy
+  "ssc napoli": "napoli",
+  "ac milan": "milan",
+  "inter milan": "inter",
+  "fc internazionale milano": "inter",
+  "as roma": "roma",
+  "ss lazio": "lazio",
+  "atalanta bc": "atalanta",
+  "acf fiorentina": "fiorentina",
+  "torino fc": "torino",
+  "bologna fc 1909": "bologna",
+  "us sassuolo calcio": "sassuolo",
+  "hellas verona fc": "verona",
+  "us lecce": "lecce",
+  "cagliari calcio": "cagliari",
+  "genoa cfc": "genoa",
+  "udinese calcio": "udinese",
+  "empoli fc": "empoli",
+  "como 1907": "como",
+  "parma calcio 1913": "parma",
+  "venezia fc": "venezia",
+  // England
+  "wolverhampton wanderers fc": "wolverhampton wanderers",
+  "nottingham forest fc": "nottingham forest",
+  "newcastle united fc": "newcastle united",
+  "manchester united fc": "manchester united",
+  "manchester city fc": "manchester city",
+  "tottenham hotspur fc": "tottenham",
+  "west ham united fc": "west ham united",
+  "brighton & hove albion fc": "brighton",
+  "crystal palace fc": "crystal palace",
+  "leicester city fc": "leicester",
+  "afc bournemouth": "bournemouth",
+  "southampton fc": "southampton",
+  "ipswich town fc": "ipswich",
+};
 
 export function findTeamXG(
   allXG: Record<string, TeamXG>,
   teamName: string
 ): TeamXG | null {
-  const normalized = teamName.toLowerCase();
+  const normalized = normalizeTeamName(teamName);
+  const lowered = teamName.toLowerCase();
 
-  // Exact match
-  if (allXG[normalized]) return allXG[normalized];
+  // Exact match (Understat keys are lowercased titles)
+  if (allXG[lowered]) return allXG[lowered];
 
-  // Partial match
+  // Alias match (aliases use lowercased football-data.org names)
+  const alias = UNDERSTAT_ALIASES[lowered];
+  if (alias && allXG[alias]) return allXG[alias];
+
+  // NFD-normalized exact match (handles diacritics: "Saint-Étienne" → "saintetienne")
   for (const [key, xg] of Object.entries(allXG)) {
-    if (key.includes(normalized) || normalized.includes(key)) return xg;
+    if (normalizeTeamName(key) === normalized) return xg;
   }
 
-  // Word-based match (e.g. "Manchester United FC" -> "Manchester United")
-  const words = normalized.split(/\s+/).filter((w) => w.length > 3);
+  // Best partial match: prefer longest key match to avoid "inter" matching "inter milan" over "internazionale"
+  let bestMatch: TeamXG | null = null;
+  let bestLen = 0;
   for (const [key, xg] of Object.entries(allXG)) {
-    if (words.every((w) => key.includes(w))) return xg;
+    if (key.includes(lowered) || lowered.includes(key)) {
+      const matchLen = Math.min(key.length, lowered.length);
+      if (matchLen > bestLen) { bestMatch = xg; bestLen = matchLen; }
+    }
+  }
+  if (bestMatch) return bestMatch;
+
+  // Word-based match (e.g. "Manchester United FC" -> "Manchester United")
+  const words = lowered.split(/\s+/).filter((w) => w.length > 3);
+  for (const [key, xg] of Object.entries(allXG)) {
+    if (words.length > 0 && words.every((w) => key.includes(w))) return xg;
   }
 
   return null;

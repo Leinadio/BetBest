@@ -1,3 +1,4 @@
+import { normalizeTeamName } from "./normalize";
 import { TeamElo } from "./types";
 
 const cache = new Map<string, { data: TeamElo[]; ts: number }>();
@@ -14,7 +15,11 @@ export async function getAllEloRatings(): Promise<TeamElo[]> {
       next: { revalidate: 86400 },
     });
 
-    if (!res.ok) return [];
+    if (!res.ok) {
+      // Stale-while-revalidate: return expired cache if available
+      if (cached) return cached.data;
+      return [];
+    }
 
     const text = await res.text();
     const lines = text.trim().split("\n");
@@ -34,6 +39,8 @@ export async function getAllEloRatings(): Promise<TeamElo[]> {
     return ratings;
   } catch (error) {
     console.error("ClubElo fetch failed:", error);
+    // Stale-while-revalidate: return expired cache if available
+    if (cached) return cached.data;
     return [];
   }
 }
@@ -42,11 +49,12 @@ export function findTeamElo(
   allElo: TeamElo[],
   teamName: string
 ): TeamElo | null {
-  const normalized = teamName.toLowerCase();
+  const lowered = teamName.toLowerCase();
+  const normalized = normalizeTeamName(teamName);
 
   // Direct match
   const direct = allElo.find(
-    (e) => e.team.toLowerCase() === normalized
+    (e) => e.team.toLowerCase() === lowered
   );
   if (direct) return direct;
 
@@ -86,7 +94,7 @@ export function findTeamElo(
     "fc porto": "porto",
   };
 
-  const alias = ALIASES[normalized];
+  const alias = ALIASES[lowered];
   if (alias) {
     const found = allElo.find(
       (e) => e.team.toLowerCase() === alias
@@ -94,20 +102,30 @@ export function findTeamElo(
     if (found) return found;
   }
 
-  // Partial match: significant words
-  const words = normalized
-    .split(/\s+/)
-    .filter((w) => w.length > 3 && !["fc", "sc", "club", "united", "city"].includes(w));
+  // NFD-normalized match (handles diacritics: "Bayern München" → "bayernmunchen")
+  const nfdMatch = allElo.find(
+    (e) => normalizeTeamName(e.team) === normalized
+  );
+  if (nfdMatch) return nfdMatch;
 
+  // Best partial match: prefer longest match to avoid ambiguity ("inter" vs "inter milan")
+  const words = lowered
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && !["fc", "sc", "cf", "afc"].includes(w));
+
+  let bestMatch: TeamElo | null = null;
+  let bestLen = 0;
   for (const entry of allElo) {
     const eloLower = entry.team.toLowerCase();
-    if (eloLower.includes(normalized) || normalized.includes(eloLower)) {
-      return entry;
+    if (eloLower.includes(lowered) || lowered.includes(eloLower)) {
+      const matchLen = Math.min(eloLower.length, lowered.length);
+      if (matchLen > bestLen) { bestMatch = entry; bestLen = matchLen; }
     }
-    if (words.length > 0 && words.every((w) => eloLower.includes(w))) {
-      return entry;
+    if (!bestMatch && words.length > 0 && words.every((w) => eloLower.includes(w))) {
+      bestMatch = entry;
+      bestLen = words.join("").length;
     }
   }
 
-  return null;
+  return bestMatch;
 }

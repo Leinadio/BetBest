@@ -109,7 +109,7 @@ function FactorRow({
         <div className="mt-0.5 h-1 rounded-full bg-zinc-800 overflow-hidden">
           <div
             className="h-full rounded-full bg-orange-500/60"
-            style={{ width: `${pct * 5}%` }}
+            style={{ width: `${Math.min(pct * 4, 100)}%` }}
           />
         </div>
         <div className="text-[10px] text-zinc-600 mt-0.5">Poids {pct}%</div>
@@ -761,11 +761,32 @@ function OddsCompact({
   homeTla: string;
   awayTla: string;
 }) {
+  // Guard against invalid odds (zero or negative → division by zero)
+  if (odds.homeWin <= 0 || odds.draw <= 0 || odds.awayWin <= 0) return null;
+
   // Convert odds to implied probabilities
   const total = 1 / odds.homeWin + 1 / odds.draw + 1 / odds.awayWin;
-  const impliedHome = Math.round((1 / odds.homeWin / total) * 100);
-  const impliedDraw = Math.round((1 / odds.draw / total) * 100);
-  const impliedAway = Math.round((1 / odds.awayWin / total) * 100);
+  if (!total || !Number.isFinite(total)) return null;
+
+  // Largest remainder — guarantees sum = 100
+  const rIH = (1 / odds.homeWin / total) * 100;
+  const rID = (1 / odds.draw / total) * 100;
+  const rIA = (1 / odds.awayWin / total) * 100;
+  let impliedHome = Math.floor(rIH);
+  let impliedDraw = Math.floor(rID);
+  let impliedAway = Math.floor(rIA);
+  let iDef = 100 - (impliedHome + impliedDraw + impliedAway);
+  for (const x of [
+    { k: "h", r: rIH - impliedHome },
+    { k: "d", r: rID - impliedDraw },
+    { k: "a", r: rIA - impliedAway },
+  ].sort((a, b) => b.r - a.r)) {
+    if (iDef <= 0) break;
+    if (x.k === "h") impliedHome++;
+    else if (x.k === "d") impliedDraw++;
+    else impliedAway++;
+    iDef--;
+  }
 
   return (
     <div>
@@ -1016,9 +1037,9 @@ function EloCompact({
   const label = absDiff < 50 ? "Très serré" : absDiff < 100 ? "Avantage modéré" : "Écart significatif";
   const labelColor = absDiff < 50 ? "text-zinc-400" : absDiff < 100 ? "text-yellow-400" : "text-orange-400";
 
-  // Bar proportions (min 1200, max ~2100)
-  const min = 1200;
-  const max = 2100;
+  // Bar proportions (aligned with eloToScore in prediction-engine.ts: 1100-2200)
+  const min = 1100;
+  const max = 2200;
   const homePct = homeVal ? ((homeVal - min) / (max - min)) * 100 : 0;
   const awayPct = awayVal ? ((awayVal - min) / (max - min)) * 100 : 0;
 

@@ -194,7 +194,6 @@ export interface StrengthOfSchedule {
 export interface CalculateStatsInput {
   homeStanding: Standing;
   awayStanding: Standing;
-  totalTeams: number;
   homeInjuries?: Injury[];
   awayInjuries?: Injury[];
   homeSquadQuality?: number;
@@ -229,6 +228,7 @@ export interface Prediction {
   confidence: number;
   reasoning: string;
   analysis?: PredictionAnalysis;
+  isFallback?: boolean;
   statsScore: StatsScore;
   homeTeam: Team;
   awayTeam: Team;

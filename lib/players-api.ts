@@ -70,9 +70,15 @@ export async function getKeyPlayers(
 
   const playerMap = new Map<number, KeyPlayer & { teamKey: string }>();
 
+  // Pick the statistics entry with the most goals (relevant for the queried league)
+  const bestScorerStat = (stats: APIPlayerEntry["statistics"]) =>
+    stats.reduce((best, s) => ((s.goals.total ?? 0) > (best.goals.total ?? 0) ? s : best), stats[0]);
+  const bestAssistStat = (stats: APIPlayerEntry["statistics"]) =>
+    stats.reduce((best, s) => ((s.goals.assists ?? 0) > (best.goals.assists ?? 0) ? s : best), stats[0]);
+
   for (const entry of scorersData.response) {
-    const stat = entry.statistics[0];
-    if (!stat) continue;
+    if (entry.statistics.length === 0) continue;
+    const stat = bestScorerStat(entry.statistics);
     const teamKey = normalizeTeamName(stat.team.name);
     playerMap.set(entry.player.id, {
       playerId: entry.player.id,
@@ -87,8 +93,8 @@ export async function getKeyPlayers(
   }
 
   for (const entry of assistsData.response) {
-    const stat = entry.statistics[0];
-    if (!stat) continue;
+    if (entry.statistics.length === 0) continue;
+    const stat = bestAssistStat(entry.statistics);
     const teamKey = normalizeTeamName(stat.team.name);
     const existing = playerMap.get(entry.player.id);
     if (existing) {
@@ -144,16 +150,39 @@ export function identifyCriticalAbsences(
 ): CriticalAbsence[] {
   const absences: CriticalAbsence[] = [];
 
+  // NFD normalize: strip diacritics for cross-source player name matching (Mbappé→mbappe)
+  const nfdLower = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
   for (const player of keyPlayers) {
-    const playerNorm = player.name.toLowerCase();
-    const matchedInjury = injuries.find((inj) => {
-      const injNorm = inj.player.toLowerCase();
-      return (
-        injNorm.includes(playerNorm) ||
-        playerNorm.includes(injNorm) ||
-        injNorm.split(" ").pop() === playerNorm.split(" ").pop()
-      );
-    });
+    const playerNorm = nfdLower(player.name);
+
+    // Score each injury match: higher = better. Pick the best to avoid false positives (e.g. "silva").
+    let bestInjury: Injury | null = null;
+    let bestScore = 0;
+    for (const inj of injuries) {
+      const injNorm = nfdLower(inj.player);
+      let score = 0;
+
+      // Exact match is best
+      if (injNorm === playerNorm) {
+        score = 100;
+      } else if (injNorm.includes(playerNorm) || playerNorm.includes(injNorm)) {
+        // Containment match — longer overlap = more specific = better
+        score = Math.min(injNorm.length, playerNorm.length);
+      } else {
+        // Last name + first initial match (avoids Hernandez/Torres false positives)
+        const injParts = injNorm.split(" ");
+        const playerParts = playerNorm.split(" ");
+        if (injParts.length >= 2 && playerParts.length >= 2) {
+          const lastMatch = injParts[injParts.length - 1] === playerParts[playerParts.length - 1];
+          const firstInitial = injParts[0][0] === playerParts[0][0];
+          if (lastMatch && firstInitial) score = 1;
+        }
+      }
+
+      if (score > bestScore) { bestScore = score; bestInjury = inj; }
+    }
+    const matchedInjury = bestInjury;
 
     if (matchedInjury) {
       const contributions = player.goals + player.assists;

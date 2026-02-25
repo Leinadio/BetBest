@@ -55,6 +55,13 @@ export function PredictionCard({ prediction }: PredictionCardProps) {
         </div>
       </div>
 
+      {/* Fallback warning */}
+      {prediction.isFallback && (
+        <div className="rounded-lg bg-amber-900/30 border border-amber-700 px-4 py-2 text-xs text-amber-300">
+          Analyse basée sur le modèle statistique uniquement (l'IA n'a pas pu générer d'analyse détaillée).
+        </div>
+      )}
+
       {/* Confidence */}
       <ConfidenceBar confidence={prediction.confidence} />
 

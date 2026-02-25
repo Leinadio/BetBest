@@ -1,4 +1,7 @@
 import { Injury } from "./types";
+import { normalizeTeamName } from "./normalize";
+
+export { normalizeTeamName } from "./normalize";
 
 export const BASE_URL = "https://v3.football.api-sports.io";
 
@@ -10,10 +13,6 @@ export const LEAGUE_IDS: Record<string, number> = {
   BL1: 78,
   FL1: 61,
 };
-
-export function normalizeTeamName(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]/g, "");
-}
 
 /** Returns [currentSeason, fallbackSeason] to handle free-plan API limits. */
 export function getSeasonCandidates(): [number, number] {

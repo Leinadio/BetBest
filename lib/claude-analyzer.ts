@@ -10,6 +10,7 @@ interface AnalyzeParams {
   awayStanding: Standing;
   statsScore: StatsScore;
   leagueCode: string;
+  matchDate?: string;
   homeInjuries?: Injury[];
   awayInjuries?: Injury[];
   homePlayerAnalysis?: TeamPlayerAnalysis;
@@ -40,6 +41,7 @@ export async function analyzePrediction({
   awayStanding,
   statsScore,
   leagueCode,
+  matchDate,
   homeInjuries,
   awayInjuries,
   homePlayerAnalysis,
@@ -235,14 +237,67 @@ export async function analyzePrediction({
     return lines.join("\n");
   };
 
-  const systemPrompt = `Tu es un analyste football expert. Ta méthode est rigoureuse et reproductible : tu ne devines pas, tu déduis à partir des données. Si les données sont insuffisantes pour trancher, tu le dis et ta confiance reste basse (50-60). Tu réponds toujours en français.`;
+  const formatMatchDate = (d: string | undefined): string => {
+    if (!d) return "Date inconnue";
+    const date = new Date(d);
+    return date.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" });
+  };
+
+  const systemPrompt = `Tu es un analyste football expert. Ta méthode est rigoureuse et reproductible : tu ne devines pas, tu déduis à partir des données. Tu réponds toujours en français.
+
+MÉTHODE D'ANALYSE (suis ces 5 étapes dans l'ordre) :
+
+ÉTAPE 1 — RAPPORT DE FORCE
+En utilisant [CLASSEMENT] + [RATINGS ELO] + [xG] :
+- Qui est objectivement supérieur sur la saison ? (position, points/match, diff. buts, ELO, xG)
+- L'écart est-il large ou serré ?
+
+ÉTAPE 2 — DYNAMIQUE RÉCENTE
+En croisant [CLASSEMENT].forme + [xG MOMENTUM] + [SOS] + [FORME RÉCENTE DES JOUEURS] + [ACTUALITÉS] :
+- Les 5 derniers résultats confirment-ils ou contredisent-ils le rapport de force ?
+- Le momentum xG confirme-t-il la forme ? (une équipe qui gagne mais dont les xG baissent = régression probable, et inversement)
+- Le SOS contextualise-t-il les résultats ? (5V contre des équipes mal classées ≠ 5V contre le top 6)
+- Les joueurs clés sont-ils en forme ou en méforme ? (buts/passes récents vs stats saison)
+- Y a-t-il des news impactantes (changement coach, tension vestiaire, série historique) ?
+
+ÉTAPE 3 — CONFRONTATION TACTIQUE
+En croisant [TACTIQUE] des deux équipes + [CONFRONTATIONS DIRECTES] :
+- Comment la formation et le style de A interagissent-ils avec ceux de B ?
+  (ex: 4-3-3 offensif vs 5-3-2 compact, équipe qui marque en fin de match vs équipe qui encaisse tôt)
+- Les bilans dom/ext respectifs créent-ils un avantage ? (ex: fort à domicile vs faible à l'extérieur)
+- Les confrontations directes révèlent-elles une domination ou des matchs serrés ?
+
+ÉTAPE 4 — FACTEURS CONTEXTUELS
+En croisant ENSEMBLE [BLESSURES] × [JOUEURS CLÉS] × [FATIGUE] × [ENJEUX] × [ARBITRE] :
+- Quels facteurs CONVERGENT (pointent vers le même résultat) ?
+  (ex: équipe A reposée + joueurs clés dispo + course au titre = forte motivation et moyens)
+- Quels facteurs DIVERGENT (se contredisent) ?
+  (ex: équipe B en forme mais fatiguée et sans son buteur principal)
+- Un joueur clé absent change-t-il fondamentalement le rapport de force ?
+
+ÉTAPE 5 — VERDICT FINAL
+- Synthèse : sur la base des étapes 1-4, forme ton propre verdict indépendamment. Choisis l'outcome (1, N ou 2) et ta confiance en te basant sur les données factuelles analysées.
+- Compare ensuite avec les cotes du marché si disponibles : si tu diverges significativement, explique quelles données justifient cet écart.
+- Ta confiance doit refléter la solidité des convergences : beaucoup de convergences = confiance haute (72-88), beaucoup de divergences = confiance basse (50-65). En football, une confiance >85 est exceptionnelle (réservée aux déséquilibres extrêmes).
+- Si les données sont insuffisantes pour trancher, tu le dis et ta confiance reste basse (50-60).
+
+FORMAT DE RÉPONSE :
+Réponds UNIQUEMENT avec un JSON valide (sans markdown, sans backticks) :
+{
+  "outcome": "1" ou "N" ou "2",
+  "confidence": nombre entre 50 et 88,
+  "analysis": {
+    "powerBalance": "1-2 phrases sur le rapport de force brut",
+    "momentum": "1-2 phrases sur la dynamique récente (forme + joueurs + news)",
+    "tacticalEdge": "1-2 phrases sur la confrontation tactique (styles + bilans dom/ext + H2H)",
+    "contextualFactors": "2-3 phrases : liste les convergences et divergences des facteurs contextuels (absences, fatigue, enjeux, arbitre)",
+    "verdict": "2-3 phrases : synthèse finale avec résultat choisi, justification principale, et positionnement par rapport aux cotes"
+  }
+}`;
 
   const prompt = `Match : ${homeTeam.name} (domicile) vs ${awayTeam.name} (extérieur)
 Compétition : ${leagueCode}
-
-══════════════════════════════════
-DONNÉES DISPONIBLES
-══════════════════════════════════
+Date : ${formatMatchDate(matchDate)}
 
 [RATINGS ELO (ClubElo.com)]
 ${homeTeam.name} : ${homeElo ? Math.round(homeElo.elo) : "N/A"}
@@ -298,101 +353,89 @@ ${formatOdds(odds)}
 ${formatFatigue(fatigue)}
 
 [ENJEUX]
-${formatMatchContext(matchContext)}
+${formatMatchContext(matchContext)}`;
 
-[MODÈLE STATISTIQUE — 14 facteurs pondérés]
-${statsScore.factors.map((f) => `${f.label} (${Math.round(f.weight * 100)}%) : ${f.homeValue} vs ${f.awayValue}`).join("\n")}
-→ Résultat : 1=${statsScore.homeScore}% N=${statsScore.drawScore}% 2=${statsScore.awayScore}%
-
-══════════════════════════════════
-MÉTHODE D'ANALYSE (suis ces 5 étapes dans l'ordre)
-══════════════════════════════════
-
-ÉTAPE 1 — RAPPORT DE FORCE
-En utilisant [CLASSEMENT] + [MODÈLE STATISTIQUE] :
-- Qui est objectivement supérieur sur la saison ? (position, points/match, diff. buts)
-- L'écart est-il large ou serré ?
-
-ÉTAPE 2 — DYNAMIQUE RÉCENTE
-En croisant [CLASSEMENT].forme + [xG MOMENTUM] + [SOS] + [FORME RÉCENTE DES JOUEURS] + [ACTUALITÉS] :
-- Les 5 derniers résultats confirment-ils ou contredisent-ils le rapport de force ?
-- Le momentum xG confirme-t-il la forme ? (une équipe qui gagne mais dont les xG baissent = régression probable, et inversement)
-- Le SOS contextualise-t-il les résultats ? (5V contre des équipes mal classées ≠ 5V contre le top 6)
-- Les joueurs clés sont-ils en forme ou en méforme ? (buts/passes récents vs stats saison)
-- Y a-t-il des news impactantes (changement coach, tension vestiaire, série historique) ?
-
-ÉTAPE 3 — CONFRONTATION TACTIQUE
-En croisant [TACTIQUE] des deux équipes + [CONFRONTATIONS DIRECTES] :
-- Comment la formation et le style de A interagissent-ils avec ceux de B ?
-  (ex: 4-3-3 offensif vs 5-3-2 compact, équipe qui marque en fin de match vs équipe qui encaisse tôt)
-- Les bilans dom/ext respectifs créent-ils un avantage ? (ex: fort à domicile vs faible à l'extérieur)
-- Les confrontations directes révèlent-elles une domination ou des matchs serrés ?
-
-ÉTAPE 4 — FACTEURS CONTEXTUELS
-En croisant ENSEMBLE [BLESSURES] × [JOUEURS CLÉS] × [FATIGUE] × [ENJEUX] × [ARBITRE] :
-- Quels facteurs CONVERGENT (pointent vers le même résultat) ?
-  (ex: équipe A reposée + joueurs clés dispo + course au titre = forte motivation et moyens)
-- Quels facteurs DIVERGENT (se contredisent) ?
-  (ex: équipe B en forme mais fatiguée et sans son buteur principal)
-- Un joueur clé absent change-t-il fondamentalement le rapport de force ?
-
-ÉTAPE 5 — VERDICT FINAL
-- Synthèse : sur la base des 4 étapes, quel résultat est le plus probable ?
-- Compare ton verdict aux cotes du marché. Si tu diverges significativement, explique quelles données justifient cet écart.
-- Ta confiance doit refléter la solidité des convergences : beaucoup de convergences = confiance haute (72-88), beaucoup de divergences = confiance basse (50-65). En football, une confiance >85 est exceptionnelle (réservée aux déséquilibres extrêmes).
-
-══════════════════════════════════
-FORMAT DE RÉPONSE
-══════════════════════════════════
-
-Réponds UNIQUEMENT avec un JSON valide (sans markdown, sans backticks) :
-{
-  "outcome": "1" ou "N" ou "2",
-  "confidence": nombre entre 50 et 88,
-  "analysis": {
-    "powerBalance": "1-2 phrases sur le rapport de force brut",
-    "momentum": "1-2 phrases sur la dynamique récente (forme + joueurs + news)",
-    "tacticalEdge": "1-2 phrases sur la confrontation tactique (styles + bilans dom/ext + H2H)",
-    "contextualFactors": "2-3 phrases : liste les convergences et divergences des facteurs contextuels (absences, fatigue, enjeux, arbitre)",
-    "verdict": "2-3 phrases : synthèse finale avec résultat choisi, justification principale, et positionnement par rapport aux cotes"
+  // Retry with exponential backoff + model fallback for transient errors (529 overloaded, 5xx)
+  const MODELS = ["claude-sonnet-4-6", "claude-haiku-4-5-20251001"] as const;
+  let message: Anthropic.Message | null = null;
+  const MAX_RETRIES = 3;
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    // Last attempt: fall back to Haiku (faster, more available)
+    const model = attempt < MAX_RETRIES - 1 ? MODELS[0] : MODELS[1];
+    try {
+      message = await anthropic.messages.create({
+        model,
+        max_tokens: 4096,
+        temperature: 0,
+        system: systemPrompt,
+        messages: [{ role: "user", content: prompt }],
+      });
+      break;
+    } catch (err: unknown) {
+      const status = (err as { status?: number }).status;
+      const isRetryable = status === 529 || status === 500 || status === 502 || status === 503;
+      if (!isRetryable || attempt === MAX_RETRIES - 1) throw err;
+      const delay = Math.min(2000 * Math.pow(2, attempt), 10000);
+      console.warn(`[claude-analyzer] Attempt ${attempt + 1} failed (${model}, ${status}), retrying in ${delay}ms...`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
   }
-}`;
 
-  const message = await anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 1024,
-    temperature: 0,
-    system: systemPrompt,
-    messages: [{ role: "user", content: prompt }],
-  });
-
-  const text = message.content[0].type === "text" ? message.content[0].text : "";
+  const text = message!.content[0].type === "text" ? message!.content[0].text : "";
 
   interface AnalysisResponse {
     outcome: "1" | "N" | "2";
     confidence: number;
     analysis: PredictionAnalysis;
+    isFallback: boolean;
   }
 
   let parsed: AnalysisResponse;
   try {
-    parsed = JSON.parse(text);
-  } catch {
+    // Strip markdown fences, leading/trailing text around JSON
+    let cleaned = text.trim();
+    const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fenceMatch) cleaned = fenceMatch[1].trim();
+    const braceIdx = cleaned.indexOf("{");
+    if (braceIdx > 0) cleaned = cleaned.slice(braceIdx);
+    const lastBrace = cleaned.lastIndexOf("}");
+    if (lastBrace > 0) cleaned = cleaned.slice(0, lastBrace + 1);
+
+    const raw = JSON.parse(cleaned);
+
+    // Validate structure
+    if (!raw.outcome || !["1", "N", "2"].includes(raw.outcome) || typeof raw.confidence !== "number" || !raw.analysis) {
+      throw new Error("Invalid response structure");
+    }
+    parsed = { ...raw, isFallback: false };
+  } catch (parseError) {
+    console.error("[claude-analyzer] JSON parse failed:", parseError, "Raw text:", text.slice(0, 500));
     // Fallback: use stats-based prediction
-    const maxScore = Math.max(statsScore.homeScore, statsScore.drawScore, statsScore.awayScore);
-    let outcome: "1" | "N" | "2" = "1";
-    if (maxScore === statsScore.drawScore) outcome = "N";
-    else if (maxScore === statsScore.awayScore) outcome = "2";
+    const { homeScore, drawScore, awayScore } = statsScore;
+    let outcome: "1" | "N" | "2";
+    if (homeScore > awayScore && homeScore > drawScore) outcome = "1";
+    else if (awayScore > homeScore && awayScore > drawScore) outcome = "2";
+    else outcome = "N";
+
+    const maxScore = Math.max(homeScore, drawScore, awayScore);
+    const outcomeLabel = outcome === "1" ? "le domicile" : outcome === "2" ? "l'extérieur" : "le nul";
+
+    const posCompare = homeStanding.position < awayStanding.position
+      ? `${homeTeam.name} est mieux classé (${homeStanding.position}e vs ${awayStanding.position}e).`
+      : homeStanding.position > awayStanding.position
+        ? `${awayTeam.name} est mieux classé (${awayStanding.position}e vs ${homeStanding.position}e).`
+        : "Les deux équipes sont à la même position au classement.";
 
     parsed = {
       outcome,
-      confidence: Math.min(maxScore, 85),
+      confidence: Math.max(50, Math.min(65, Math.round(maxScore * 0.75))),
+      isFallback: true,
       analysis: {
-        powerBalance: "Analyse basée sur les statistiques disponibles.",
-        momentum: "",
-        tacticalEdge: "",
-        contextualFactors: "",
-        verdict: "Prédiction basée sur le modèle statistique.",
+        powerBalance: `${homeTeam.name} (${homeStanding.position}e, ${homeStanding.points}pts) vs ${awayTeam.name} (${awayStanding.position}e, ${awayStanding.points}pts). ${posCompare}`,
+        momentum: `Forme récente : ${homeTeam.name} ${homeStanding.form ?? "N/A"} | ${awayTeam.name} ${awayStanding.form ?? "N/A"}.`,
+        tacticalEdge: "Analyse tactique IA indisponible pour ce match.",
+        contextualFactors: `${homeInjuries?.length ?? 0} absent(s) chez ${homeTeam.name}, ${awayInjuries?.length ?? 0} chez ${awayTeam.name}.`,
+        verdict: `Le modèle statistique favorise ${outcomeLabel} avec une probabilité de ${maxScore}%.`,
       },
     };
   }
@@ -409,6 +452,7 @@ Réponds UNIQUEMENT avec un JSON valide (sans markdown, sans backticks) :
     confidence: Math.max(50, Math.min(88, parsed.confidence)),
     reasoning,
     analysis: parsed.analysis,
+    isFallback: parsed.isFallback,
     statsScore,
     homeTeam,
     awayTeam,

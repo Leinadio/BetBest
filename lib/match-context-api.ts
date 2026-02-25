@@ -101,6 +101,7 @@ interface OddsAPIEvent {
 }
 
 const NOISE_WORDS = new Set(["fc", "rc", "sc", "ac", "cf", "de", "du", "le", "la", "les", "of", "the", "club", "racing", "sporting", "olympique", "stade", "association", "aj", "as", "og", "ogc", "us", "sco", "osc"]);
+const GENERIC_TEAM_WORDS = new Set(["united", "city", "real", "athletic", "atletico", "inter", "milan"]);
 
 function getSignificantWords(name: string): string[] {
   return name
@@ -111,15 +112,17 @@ function getSignificantWords(name: string): string[] {
 }
 
 function teamsMatch(nameA: string, nameB: string): boolean {
-  // 1. Substring match on full normalized names
+  // 1. Substring match on full normalized names (require >50% coverage to avoid "chester" ∈ "manchester")
   const normA = normalizeTeamName(nameA);
   const normB = normalizeTeamName(nameB);
-  if (normA.includes(normB) || normB.includes(normA)) return true;
+  const shorter = normA.length <= normB.length ? normA : normB;
+  const longer = normA.length > normB.length ? normA : normB;
+  if (shorter.length >= 3 && longer.includes(shorter) && shorter.length / longer.length > 0.5) return true;
 
-  // 2. Word-level match: at least one significant word in common
+  // 2. Word-level: strict equality on distinguishing words (no substring, no generic words)
   const wordsA = getSignificantWords(nameA);
   const wordsB = getSignificantWords(nameB);
-  return wordsA.some((wa) => wordsB.some((wb) => wa === wb || wa.includes(wb) || wb.includes(wa)));
+  return wordsA.some((wa) => wa.length >= 4 && !GENERIC_TEAM_WORDS.has(wa) && wordsB.some((wb) => wa === wb));
 }
 
 export async function getMatchOdds(
@@ -159,11 +162,35 @@ export async function getMatchOdds(
     const h2h = preferred.markets.find((m) => m.key === "h2h");
     if (!h2h) return null;
 
-    const homeOdd = h2h.outcomes.find((o) => teamsMatch(homeTeamName, o.name));
     const drawOdd = h2h.outcomes.find((o) => o.name === "Draw");
-    const awayOdd = h2h.outcomes.find((o) => teamsMatch(awayTeamName, o.name));
+    if (!drawOdd) return null;
 
-    if (!homeOdd || !drawOdd || !awayOdd) return null;
+    // Find home/away odds — guard against both matching the same outcome (derby intra-ville)
+    const nonDrawOutcomes = h2h.outcomes.filter((o) => o.name !== "Draw");
+    let homeOdd = nonDrawOutcomes.find((o) => teamsMatch(homeTeamName, o.name));
+    let awayOdd = nonDrawOutcomes.find((o) => teamsMatch(awayTeamName, o.name));
+
+    // If both matched the same outcome, or one is missing, fall back to positional order
+    // (odds API returns outcomes in order: home, draw, away)
+    if (!homeOdd || !awayOdd || homeOdd === awayOdd) {
+      if (nonDrawOutcomes.length >= 2) {
+        // Use the-odds-api convention: first non-draw = home_team, second = away_team
+        const homeIdx = nonDrawOutcomes.findIndex((o) => teamsMatch(event.home_team, o.name));
+        const awayIdx = nonDrawOutcomes.findIndex((o) => teamsMatch(event.away_team, o.name));
+        if (homeIdx !== -1 && awayIdx !== -1 && homeIdx !== awayIdx) {
+          homeOdd = nonDrawOutcomes[homeIdx];
+          awayOdd = nonDrawOutcomes[awayIdx];
+        } else {
+          // Last resort: positional (the-odds-api lists home first)
+          homeOdd = nonDrawOutcomes[0];
+          awayOdd = nonDrawOutcomes[1];
+        }
+      } else {
+        return null;
+      }
+    }
+
+    if (!homeOdd || !awayOdd) return null;
 
     return {
       homeWin: homeOdd.price,
